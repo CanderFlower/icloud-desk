@@ -1,0 +1,8 @@
+pyicloud>=2026.10.1
+fastapi>=0.115
+uvicorn>=0.30
+pywebview>=5.0
+keyring>=25
+python-multipart>=0.0.9
+requests>=2.31
+tzlocal>=5
