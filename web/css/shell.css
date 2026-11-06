@@ -1,0 +1,63 @@
+/* App shell extras: boot screen, login chrome, CLI/about dialogs. */
+
+.boot { gap: 20px; }
+.boot-logo { width: 72px; height: 72px; border-radius: 18px; animation: boot-pulse 1.6s ease-in-out infinite; }
+@keyframes boot-pulse { 50% { transform: scale(.96); opacity: .75; } }
+
+.center-screen h2 { font-size: 18px; }
+.empty-icon.big { width: 64px; height: 64px; border-radius: 18px; display: flex; align-items: center; justify-content: center; background: rgba(255, 59, 48, .1); color: var(--danger); }
+
+/* login */
+.login-screen { position: relative; flex-direction: column; }
+.login-top { position: absolute; top: 0; left: 0; right: 0; height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 18px; }
+.login-brand { width: 22px; height: 22px; }
+.login-card .logo { box-shadow: none; filter: drop-shadow(0 6px 18px rgba(0, 122, 255, .18)); }
+.login-card .logo-badge {
+  width: 72px; height: 72px; margin: 0 auto 18px; border-radius: 20px; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(160deg, #34c759, #248a3d); color: #fff; box-shadow: 0 10px 30px rgba(52, 199, 89, .3);
+}
+.login-card .logo-badge .ic { stroke-width: 1.6; }
+.login-form .btn.lg { margin-top: 4px; }
+.login-links { margin-top: 14px; }
+.spin.on-accent { width: 14px; height: 14px; border-color: rgba(255, 255, 255, .35); border-top-color: #fff; }
+.code-boxes.shake { animation: shake .4s; }
+@keyframes shake { 20%, 60% { transform: translateX(-8px); } 40%, 80% { transform: translateX(8px); } }
+
+/* sidebar brand behaves as "expand" when collapsed */
+.app.collapsed .sidebar-head .brand { cursor: pointer; padding: 6px; border-radius: var(--r); }
+.app.collapsed .sidebar-head .brand:hover { background: var(--hover); }
+.sidebar-head .brand .app-icon img { border-radius: 0; }
+.nav-item .app-icon, .nav-item .cal-icon { width: 22px; height: 22px; --s: 22px; }
+.nav-item.active .label { font-weight: 600; }
+
+/* CLI dialog */
+.cli-intro { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 14px; }
+.cli-intro p { margin: 0 0 6px; color: var(--text-2); }
+.cli-badge { flex: none; width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #fff; background: linear-gradient(160deg, #3a3a3c, #1c1c1e); box-shadow: var(--shadow-sm); }
+.cli-dialog code { font-family: var(--font-mono); font-size: 12px; padding: 1px 5px; border-radius: 4px; background: var(--fill-2); }
+.cli-list { border-radius: var(--r-md); border: .5px solid var(--sep-strong); overflow: hidden; }
+.cli-row { display: grid; grid-template-columns: 132px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 7px 8px 7px 12px; }
+.cli-row + .cli-row { border-top: .5px solid var(--sep); }
+.cli-row:hover { background: var(--hover); }
+.cli-label { color: var(--text-2); font-size: 12px; }
+.cli-row .cli-cmd { background: transparent; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cli-tip { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: var(--text-2); font-size: 12px; }
+.cli-tip .ic { color: var(--purple); }
+@media (max-width: 640px) { .cli-row { grid-template-columns: minmax(0, 1fr) auto; } .cli-label { grid-column: 1 / -1; } }
+
+/* about */
+.modal.about .modal-header { display: none; }
+.about-body { text-align: center; padding-top: 18px; }
+.about-body img { width: 84px; height: 84px; margin: 0 auto 12px; }
+.about-body h2 { font-size: 20px; margin-bottom: 2px; }
+.about-body p { margin-top: 10px; }
+.modal.about .modal-footer .btn { flex: 1; }
+
+/* shared helpers: toolbar button visible only when .panes.collapse-side hides the side pane; settings-style glyph tiles */
+.when-side-hidden { display: none !important; }
+@media (max-width: 900px) { .when-side-hidden { display: inline-flex !important; } }
+.gi { width: 24px; height: 24px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: #fff; flex: none; background: var(--gray); }
+.gi .ic { stroke-width: 2.2; }
+.gi.red { background: var(--red); } .gi.blue { background: var(--blue); } .gi.orange { background: var(--orange); }
+.gi.green { background: var(--green); } .gi.indigo { background: var(--indigo); } .gi.purple { background: var(--purple); }
+.gi.gray { background: var(--gray); } .gi.pink { background: var(--pink); } .gi.teal { background: var(--teal); } .gi.yellow { background: var(--yellow); }

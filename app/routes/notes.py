@@ -1,4 +1,5 @@
-"""Notes (CloudKit) - read only (Apple doesn't expose a write API for notes)."""
+"""Notes (CloudKit): reading via pyicloud, writing via ``app.notes_write``
+(the same ``records/modify`` calls icloud.com Notes makes)."""
 
 from __future__ import annotations
 
@@ -6,9 +7,50 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+
+from ..notes_write import NotesWriter
 from .common import dump, run
 
 router = APIRouter(prefix="/api/notes", tags=["notes"])
+
+
+class NoteCreate(BaseModel):
+    folder_id: str | None = None
+    text: str = ""
+
+
+class NoteUpdate(BaseModel):
+    text: str
+    force: bool = False
+    change_tag: str | None = None
+
+
+class NoteMove(BaseModel):
+    id: str
+    folder_id: str
+
+
+class FolderCreate(BaseModel):
+    title: str | None = None
+    name: str | None = Field(default=None, description="alias of title")
+    parent_id: str | None = None
+
+
+class FolderRename(BaseModel):
+    title: str | None = None
+    name: str | None = Field(default=None, description="alias of title")
+
+
+def _writer(api: Any) -> NotesWriter:
+    return NotesWriter.for_api(api)
+
+
+def _forget_folder(api: Any, *ids: str) -> None:
+    cache = getattr(api.notes, "_folder_name_cache", None)
+    if isinstance(cache, dict):
+        for fid in ids:
+            cache.pop(fid, None)
 
 
 @router.get("/folders")
@@ -46,7 +88,72 @@ def note(note_id: str):
             data["html"] = api.notes.render_note(note_id)
         except Exception:  # noqa: BLE001 - fall back to plain text
             data["html"] = None
+        try:
+            data.update(_writer(api).get_state(note_id).extras())
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 - reading must keep working
+            data.update({
+                "markdown": None,
+                "editable": False,
+                "edit_blocker": f"无法检查这条备忘录是否可编辑：{exc}",
+                "edit_blocker_code": "unknown",
+                "edit_warnings": [],
+                "change_tag": None,
+            })
         return data
+
+    return run(_do)
+
+
+@router.post("/notes")
+def create_note(body: NoteCreate):
+    return run(lambda api: _writer(api).create_note(body.folder_id, body.text))
+
+
+@router.patch("/item/{note_id:path}")
+def update_note(note_id: str, body: NoteUpdate):
+    return run(
+        lambda api: _writer(api).update_note(
+            note_id, body.text, force=body.force, change_tag=body.change_tag
+        )
+    )
+
+
+@router.delete("/item/{note_id:path}")
+def delete_note(note_id: str, permanent: bool = False):
+    return run(lambda api: _writer(api).delete_note(note_id, permanent=permanent))
+
+
+@router.post("/move")
+def move_note(body: NoteMove):
+    return run(lambda api: _writer(api).move_note(body.id, body.folder_id))
+
+
+@router.post("/folders")
+def create_folder(body: FolderCreate):
+    title = body.title if body.title is not None else body.name
+    return run(lambda api: _writer(api).create_folder(title or "", body.parent_id))
+
+
+@router.patch("/folders/{folder_id:path}")
+def rename_folder(folder_id: str, body: FolderRename):
+    title = body.title if body.title is not None else body.name
+
+    def _do(api: Any) -> dict[str, Any]:
+        out = _writer(api).rename_folder(folder_id, title or "")
+        _forget_folder(api, folder_id)
+        return out
+
+    return run(_do)
+
+
+@router.delete("/folders/{folder_id:path}")
+def delete_folder(folder_id: str):
+    def _do(api: Any) -> dict[str, Any]:
+        out = _writer(api).delete_folder(folder_id)
+        _forget_folder(api, *out.get("deleted_folders", []))
+        return out
 
     return run(_do)
 

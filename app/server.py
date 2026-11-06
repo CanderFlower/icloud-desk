@@ -1,28 +1,105 @@
-"""FastAPI application: JSON API under /api, static web UI under /."""
+"""FastAPI application: JSON API under /api, static web UI under /.
+
+Every /api request must carry the per-user secret token (``Authorization:
+Bearer``, ``X-ICD-Token`` or the ``icd_token`` cookie set when the UI is
+opened via ``/?token=...``), and the Host header must be loopback. This keeps
+other websites (CSRF / DNS rebinding) away from the iCloud session.
+"""
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 import threading
+import time
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pyicloud.exceptions import PyiCloudException
 
 from . import __version__
 from .config import WEB_DIR
 from .icloud import NotLoggedIn, icloud
-from .routes import auth, calendar, drive, misc, notes, photos, reminders
 
 log = logging.getLogger("icloud-desk")
 
 DEMO = os.environ.get("ICLOUD_DESK_DEMO") == "1"
+COOKIE = "icd_token"
+_LOOPBACK = {"127.0.0.1", "localhost", "[::1]"}
+
+
+class _Activity:
+    def __init__(self) -> None:
+        self.inflight = 0
+        self.last = time.time()
+        self._lock = threading.Lock()
+
+    def begin(self) -> None:
+        with self._lock:
+            self.inflight += 1
+            self.last = time.time()
+
+    def end(self) -> None:
+        with self._lock:
+            self.inflight -= 1
+            self.last = time.time()
+
+    def idle_seconds(self) -> float:
+        with self._lock:
+            return 0.0 if self.inflight else time.time() - self.last
+
+
+activity = _Activity()
+
+
+def _token() -> str:
+    from .daemon import get_token
+
+    return get_token()
+
+
+def _request_token(request: Request) -> str | None:
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return request.headers.get("x-icd-token") or request.cookies.get(COOKIE)
+
+
+def _host_ok(request: Request) -> bool:
+    host = (request.headers.get("host") or "").rsplit(":", 1)[0].lower()
+    return host in _LOOPBACK
+
+
+_NO_TOKEN_PAGE = """<!doctype html><meta charset="utf-8"><title>iCloud Desk</title>
+<body style="font:15px -apple-system,'Segoe UI',sans-serif;display:grid;place-items:center;height:100vh;margin:0;color:#555">
+<div style="text-align:center"><h2 style="color:#111">请从 iCloud Desk 应用打开</h2>
+<p>浏览器访问需要授权链接，可在终端运行 <code>icd ui</code> 打开。</p></div></body>"""
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="iCloud Desk", version=__version__)
+    app = FastAPI(title="iCloud Desk", version=__version__, docs_url=None, redoc_url=None, openapi_url="/api/openapi.json")
+    app.state.shutdown = None
+
+    @app.middleware("http")
+    async def _guard(request: Request, call_next):
+        if not _host_ok(request):
+            return JSONResponse({"error": "forbidden host"}, status_code=403)
+        path = request.url.path
+        if path.startswith("/api/"):
+            tok = _request_token(request)
+            if not tok or not hmac.compare_digest(tok, _token()):
+                return JSONResponse({"error": "缺少或错误的访问令牌", "code": "bad_token"}, status_code=403)
+            activity.begin()
+            try:
+                return await call_next(request)
+            finally:
+                activity.end()
+        resp = await call_next(request)
+        # Static UI: always revalidate (ETag) so upgrades never serve stale JS/CSS.
+        resp.headers.setdefault("Cache-Control", "no-cache")
+        return resp
 
     @app.exception_handler(NotLoggedIn)
     async def _not_logged_in(_: Request, exc: NotLoggedIn):
@@ -46,11 +123,27 @@ def create_app() -> FastAPI:
         log.exception("Unhandled error", exc_info=exc)
         return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=500)
 
+    @app.get("/api/ping")
+    def ping():
+        return {"app": "icloud-desk", "version": __version__, "demo": DEMO, "pid": os.getpid()}
+
+    @app.get("/api/version")
+    def version():
+        return {"version": __version__, "demo": DEMO}
+
+    @app.post("/api/daemon/shutdown")
+    def shutdown():
+        if app.state.shutdown:
+            threading.Timer(0.2, app.state.shutdown).start()
+        return {"ok": True}
+
     if DEMO:
         from .demo import install_demo
 
         install_demo(app)
     else:
+        from .routes import auth, calendar, drive, misc, notes, photos, reminders
+
         for module in (auth, calendar, reminders, notes, drive, photos, misc):
             app.include_router(module.router)
 
@@ -58,12 +151,17 @@ def create_app() -> FastAPI:
         def _restore() -> None:
             threading.Thread(target=icloud.restore, name="icloud-restore", daemon=True).start()
 
-    @app.get("/api/version")
-    def version():
-        return {"version": __version__, "demo": DEMO}
-
     @app.get("/")
-    def index():
+    def index(request: Request, token: str | None = None):
+        if token:
+            if not hmac.compare_digest(token, _token()):
+                return HTMLResponse(_NO_TOKEN_PAGE, status_code=403)
+            resp = RedirectResponse("/", status_code=303)
+            resp.set_cookie(COOKIE, token, max_age=10 * 365 * 86400, httponly=True, samesite="strict", path="/")
+            return resp
+        cookie = request.cookies.get(COOKIE)
+        if not cookie or not hmac.compare_digest(cookie, _token()):
+            return HTMLResponse(_NO_TOKEN_PAGE, status_code=403)
         return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-store"})
 
     app.mount("/", StaticFiles(directory=WEB_DIR), name="web")

@@ -81,6 +81,7 @@ def _seed() -> dict[str, Any]:
         {"id": "Folder/notes", "name": "备忘录", "has_subfolders": True, "count": 3, "parent_id": None},
         {"id": "Folder/work", "name": "工作", "has_subfolders": False, "count": 1, "parent_id": "Folder/notes"},
         {"id": "Folder/recipes", "name": "菜谱", "has_subfolders": False, "count": 1, "parent_id": None},
+        {"id": "TrashFolder-CloudKit", "name": "最近删除", "has_subfolders": False, "count": 0, "parent_id": None},
     ]
     notes = [
         {"id": "Note/1", "title": "欢迎使用 iCloud Desk", "snippet": "这是演示模式的备忘录", "folder_id": "Folder/notes", "folder_name": "备忘录",
@@ -90,10 +91,19 @@ def _seed() -> dict[str, Any]:
         {"id": "Note/4", "title": "番茄炒蛋", "snippet": "鸡蛋 3 个、番茄 2 个", "folder_id": "Folder/recipes", "folder_name": "菜谱", "html": "<h2>番茄炒蛋</h2><ol><li>打蛋</li><li>炒番茄</li><li>混合</li></ol>"},
         {"id": "Note/5", "title": "密码提示", "snippet": "", "folder_id": "Folder/notes", "folder_name": "备忘录", "is_locked": True, "html": ""},
     ]
+    md = {
+        "Note/1": "# 欢迎使用 iCloud Desk\n这是**演示模式**。登录真实账户后这里会显示你的 iCloud 备忘录。\n- 日历：读写\n- 提醒事项：读写\n- 备忘录：读写\n\uFFFC",
+        "Note/2": "# 购物清单\n周末去超市\n- [x] 苹果\n- [ ] 香蕉\n- [ ] 牛奶\n- [ ] 咖啡豆",
+        "Note/3": "# 会议记录\n## Q3 目标讨论\n1. 完成 Windows 客户端\n2. 接入命令行\n  - 供 Agent 调用\n> 下次会议：周五 10:00",
+        "Note/4": "# 番茄炒蛋\n鸡蛋 3 个、番茄 2 个\n### 步骤\n1. 打蛋\n2. 炒番茄\n3. 混合出锅",
+        "Note/5": "",
+    }
     for i, n in enumerate(notes):
         n.setdefault("is_locked", False)
-        n.update({"is_deleted": False, "modified_at": (now - timedelta(days=i, hours=i * 3)).isoformat(), "text": n["snippet"], "attachments": []})
+        n.update({"is_deleted": False, "modified_at": (now - timedelta(days=i, hours=i * 3)).isoformat(), "text": n["snippet"], "attachments": [],
+                  "markdown": md[n["id"]], "editable": True, "edit_blocker": None, "edit_blocker_code": None, "edit_warnings": [], "change_tag": "t1"})
     notes[0]["attachments"] = [{"id": "att1", "filename": "说明.txt", "uti": "public.plain-text", "size": 42}]
+    notes[0].update(editable=False, edit_blocker_code="attachments", edit_blocker="这条备忘录包含附件，在此编辑会移除附件")
 
     def node(name: str, parent: str, kind: str = "file", ext: str | None = None, size: int | None = None) -> dict[str, Any]:
         nid = f"{'FOLDER' if kind == 'folder' else 'FILE'}::com.apple.CloudDocs::{uuid.uuid4()}"
@@ -291,8 +301,8 @@ def install_demo(app: FastAPI) -> None:  # noqa: C901 - flat list of fake endpoi
 
     @r.get("/notes")
     def nlist(folder_id: str | None = None, limit: int = 200):
-        rows = [n for n in DB["notes"] if not folder_id or n["folder_id"] == folder_id]
-        return [{k: v for k, v in n.items() if k not in ("html", "text", "attachments")} for n in rows][:limit]
+        rows = [n for n in DB["notes"] if (n["folder_id"] == folder_id if folder_id else n["folder_id"] != "TrashFolder-CloudKit")]
+        return [{k: v for k, v in n.items() if k not in ("html", "text", "attachments", "markdown")} for n in rows][:limit]
 
     @r.get("/notes/item/{nid:path}")
     def nget(nid: str):
@@ -305,6 +315,107 @@ def install_demo(app: FastAPI) -> None:  # noqa: C901 - flat list of fake endpoi
     def natt(nid: str, att_id: str):
         return Response("演示附件内容 / demo attachment content\n".encode(), media_type="application/octet-stream",
                         headers={"Content-Disposition": "attachment; filename*=UTF-8''demo.txt"})
+
+    def _ntext(text: str) -> tuple[str, str]:
+        import re as _re
+        lines = [_re.sub(r"^(#{1,6}\s+|\s*(- \[[ x]\] |- |\* |\d+\. |> ))", "", ln).strip() for ln in (text or "").split("\n")]
+        lines = [ln.replace("\uFFFC", "").replace("**", "") for ln in lines]
+        title = next((ln for ln in lines if ln), "") or "新备忘录"
+        rest = [ln for ln in lines if ln]
+        return title[:120], (" ".join(rest[1:])[:120] if len(rest) > 1 else "无附加文本")
+
+    def _fname(fid: str) -> str:
+        return next((f["name"] for f in DB["folders"] if f["id"] == fid), "")
+
+    def _recount() -> None:
+        for f in DB["folders"]:
+            f["count"] = sum(1 for n in DB["notes"] if n["folder_id"] == f["id"])
+            f["has_subfolders"] = any(x.get("parent_id") == f["id"] for x in DB["folders"])
+
+    @r.post("/notes/notes")
+    def ncreate(body: dict):
+        fid = body.get("folder_id") or "Folder/notes"
+        text = body.get("text") or ""
+        title, snippet = _ntext(text)
+        n = {"id": _id("Note/"), "title": title, "snippet": snippet, "folder_id": fid, "folder_name": _fname(fid), "is_locked": False,
+             "is_deleted": False, "modified_at": datetime.now().astimezone().isoformat(), "text": text, "attachments": [], "html": None,
+             "markdown": text, "editable": True, "edit_blocker": None, "edit_blocker_code": None, "edit_warnings": [], "change_tag": _id("t")}
+        DB["notes"].insert(0, n)
+        _recount()
+        return n
+
+    @r.patch("/notes/item/{nid:path}")
+    def nupdate(nid: str, body: dict):
+        n = _find(DB["notes"], "id", nid)
+        if n["is_locked"]:
+            raise HTTPException(423, "这条备忘录已加锁，无法通过网页接口编辑")
+        tag = body.get("change_tag")
+        if tag and tag != n["change_tag"]:
+            raise HTTPException(409, "备忘录已在其他设备上被修改，请刷新后重试")
+        if not n["editable"] and not body.get("force"):
+            raise HTTPException(409, f"{n['edit_blocker']}；如确认要覆盖，请使用 force=true")
+        text = body.get("text") or ""
+        title, snippet = _ntext(text)
+        n.update(title=title, snippet=snippet, text=text, markdown=text.replace("\uFFFC", ""), html=None, attachments=[], editable=True,
+                 edit_blocker=None, edit_blocker_code=None, change_tag=_id("t"), modified_at=datetime.now().astimezone().isoformat())
+        DB["notes"].remove(n)
+        DB["notes"].insert(0, n)
+        return n
+
+    @r.delete("/notes/item/{nid:path}")
+    def ndelete(nid: str, permanent: bool = False):
+        n = _find(DB["notes"], "id", nid)
+        if permanent or n["folder_id"] == "TrashFolder-CloudKit":
+            DB["notes"].remove(n)
+        else:
+            n.update(folder_id="TrashFolder-CloudKit", folder_name="最近删除")
+        _recount()
+        return {"ok": True, "id": nid, "permanent": permanent}
+
+    @r.post("/notes/move")
+    def nmove(body: dict):
+        n = _find(DB["notes"], "id", body["id"])
+        n.update(folder_id=body["folder_id"], folder_name=_fname(body["folder_id"]))
+        _recount()
+        return {"ok": True, "id": n["id"], "folder_id": n["folder_id"]}
+
+    @r.post("/notes/folders")
+    def nfcreate(body: dict):
+        title = (body.get("title") or body.get("name") or "").strip()
+        if not title:
+            raise HTTPException(400, "文件夹名称不能为空")
+        f = {"id": _id("Folder/"), "name": title, "has_subfolders": False, "count": 0, "parent_id": body.get("parent_id")}
+        DB["folders"].append(f)
+        _recount()
+        return {**f, "title": title}
+
+    @r.patch("/notes/folders/{fid:path}")
+    def nfrename(fid: str, body: dict):
+        if fid in ("Folder/notes", "TrashFolder-CloudKit"):
+            raise HTTPException(400, "系统文件夹不能重命名")
+        f = _find(DB["folders"], "id", fid)
+        f["name"] = (body.get("title") or body.get("name") or "").strip() or f["name"]
+        for n in DB["notes"]:
+            if n["folder_id"] == fid:
+                n["folder_name"] = f["name"]
+        return {**f, "title": f["name"]}
+
+    @r.delete("/notes/folders/{fid:path}")
+    def nfdelete(fid: str):
+        if fid in ("Folder/notes", "TrashFolder-CloudKit"):
+            raise HTTPException(400, "系统文件夹不能删除")
+        ids = {fid}
+        while True:
+            more = {f["id"] for f in DB["folders"] if f.get("parent_id") in ids} - ids
+            if not more:
+                break
+            ids |= more
+        for n in DB["notes"]:
+            if n["folder_id"] in ids:
+                n.update(folder_id="TrashFolder-CloudKit", folder_name="最近删除")
+        DB["folders"] = [f for f in DB["folders"] if f["id"] not in ids]
+        _recount()
+        return {"ok": True, "deleted_folders": sorted(ids)}
 
     # -- drive
     def _children(parent: str) -> list[dict[str, Any]]:

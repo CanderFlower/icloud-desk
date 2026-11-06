@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +13,14 @@ APP_NAME = "icloud-desk"
 DATA_DIR = Path(os.environ.get("ICLOUD_DESK_HOME") or Path(os.environ.get("APPDATA", Path.home())) / APP_NAME)
 SESSION_DIR = DATA_DIR / "session"
 SETTINGS_FILE = DATA_DIR / "settings.json"
+LOG_DIR = DATA_DIR / "logs"
 
-WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+if getattr(sys, "frozen", False):
+    WEB_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)) / "web"
+else:
+    WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
-for _d in (DATA_DIR, SESSION_DIR):
+for _d in (DATA_DIR, SESSION_DIR, LOG_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_SETTINGS: dict[str, Any] = {

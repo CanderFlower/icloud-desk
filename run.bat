@@ -7,7 +7,15 @@ if not exist ".venv\Scripts\python.exe" (
   ".venv\Scripts\python.exe" -m pip install -U pip >nul
   ".venv\Scripts\python.exe" -m pip install -r requirements.txt || goto :err
 )
-".venv\Scripts\python.exe" main.py %*
+:: Dev entry point. No args = open UI in the browser; otherwise forwarded to the CLI.
+::   run.bat                    open UI (real account)
+::   run.bat --demo ui          open UI with demo data
+::   run.bat calendar events    any icd command
+if "%~1"=="" (
+  ".venv\Scripts\python.exe" icd.py ui --browser
+) else (
+  ".venv\Scripts\python.exe" icd.py %*
+)
 exit /b %errorlevel%
 
 :err

@@ -123,8 +123,9 @@ def _asset(photo_id: str) -> Any:
     return asset
 
 
-@router.get("/item/{photo_id}/{version}")
-def photo_file(photo_id: str, version: str = "thumb", download: bool = False):
+@router.get("/file")
+def photo_file(id: str, version: str = "thumb", download: bool = False):
+    photo_id = id
     if version not in {"thumb", "medium", "original"}:
         raise HTTPException(400, "version 只能是 thumb / medium / original")
     asset = _asset(photo_id)
@@ -169,15 +170,16 @@ def photo_file(photo_id: str, version: str = "thumb", download: bool = False):
     return Response(content=data, media_type=media, headers=headers)
 
 
-@router.post("/item/{photo_id}/favorite")
-def favorite(photo_id: str, body: FavBody):
-    asset = _asset(photo_id)
+@router.post("/favorite")
+def favorite(body: FavBody):
+    asset = _asset(body.id)
     run(lambda api: asset.favorite() if body.value else asset.unfavorite())
     return {"ok": True}
 
 
-@router.delete("/item/{photo_id}")
-def delete(photo_id: str):
+@router.delete("/item")
+def delete(id: str):
+    photo_id = id
     asset = _asset(photo_id)
     run(lambda api: asset.delete())
     st = _state()

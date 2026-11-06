@@ -2,3 +2,9 @@
 __pycache__/
 *.pyc
 *.log
+
+# packaging
+build/
+dist/
+shell/bin/
+shell/obj/
