@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
@@ -31,7 +32,18 @@ internal sealed class MainForm : Form
     private bool _fullScreen;
     private Rectangle _preFullScreenBounds;
     private FormWindowState _preFullScreenState;
-    private NotifyIcon? _notifyIcon;
+
+    // Custom title bar, tray icon, global hotkey
+    private const int ToggleHotkeyId = 0x4943; // "IC"
+    private const string ToggleHotkeyText = "Ctrl+Alt+R";
+    private readonly CaptionBar _caption;
+    private readonly ShellSettings _settings = ShellSettings.Load();
+    private NotifyIcon? _tray;
+    private ToolStripMenuItem? _trayShowItem;
+    private bool _hotkeyRegistered;
+    private bool _exiting;
+
+    private static Color DefaultCaptionColor(bool dark) => dark ? Color.FromArgb(0x26, 0x26, 0x28) : Color.FromArgb(0xEC, 0xEC, 0xF0);
 
     public MainForm(LaunchOptions options)
     {
@@ -47,6 +59,13 @@ internal sealed class MainForm : Form
 
         RestorePlacement();
 
+        _caption = new CaptionBar(_theme, DefaultCaptionColor(_theme.Dark)) { Location = Point.Empty, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+        _caption.MinimizeClicked += (_, _) => WindowState = FormWindowState.Minimized;
+        _caption.MaximizeClicked += (_, _) => WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized;
+        _caption.CloseClicked += (_, _) => Close();
+        Controls.Add(_caption);
+        LayoutCaption();
+
         _splash = new SplashView(_theme) { Dock = DockStyle.Fill };
         _error = new ErrorView(_theme) { Dock = DockStyle.Fill, Visible = false };
         _error.RetryClicked += (_, _) => _ = StartAsync();
@@ -60,6 +79,137 @@ internal sealed class MainForm : Form
         };
 
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+        CreateTray();
+    }
+
+    // ---------------------------------------------------------------- custom caption
+
+    private void LayoutCaption()
+    {
+        if (_caption is null) return;
+        bool show = !_fullScreen;
+        int h = show ? _caption.ScaledHeight : 0;
+        _caption.Visible = show;
+        _caption.Bounds = new Rectangle(0, 0, ClientSize.Width, h);
+        _caption.Maximized = WindowState == FormWindowState.Maximized;
+        if (Padding.Top != h) Padding = new Padding(0, h, 0, 0);
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        switch (m.Msg)
+        {
+            case Native.WM_NCCALCSIZE when m.WParam != IntPtr.Zero && FormBorderStyle != FormBorderStyle.None:
+            {
+                // Keep the native left/right/bottom frame (resize borders, shadow) but drop the caption.
+                var before = Marshal.PtrToStructure<Native.RECT>(m.LParam);
+                base.WndProc(ref m);
+                var after = Marshal.PtrToStructure<Native.RECT>(m.LParam);
+                // A maximized window overhangs the monitor by the frame width; keep the top inside the screen.
+                after.Top = before.Top + (Native.IsZoomed(Handle) ? after.Left - before.Left : 0);
+                Marshal.StructureToPtr(after, m.LParam, false);
+                m.Result = IntPtr.Zero;
+                return;
+            }
+            case Native.WM_NCHITTEST when _caption is { Visible: true }:
+            {
+                base.WndProc(ref m);
+                if ((int)m.Result != Native.HTCLIENT) return;
+                var pt = PointToClient(Native.PointFromLParam(m.LParam));
+                if (pt.Y >= _caption.Height || !_caption.IsDragArea(pt)) return;
+                int border = _caption.ResizeBorder;
+                if (WindowState == FormWindowState.Normal && pt.Y < border)
+                    m.Result = (IntPtr)(pt.X < border * 2 ? Native.HTTOPLEFT : pt.X >= ClientSize.Width - border * 2 ? Native.HTTOPRIGHT : Native.HTTOP);
+                else
+                    m.Result = (IntPtr)Native.HTCAPTION;
+                return;
+            }
+            case Native.WM_HOTKEY when (int)m.WParam == ToggleHotkeyId:
+                ToggleFromHotkey();
+                return;
+        }
+        base.WndProc(ref m);
+    }
+
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        _caption.Active = true;
+    }
+
+    protected override void OnDeactivate(EventArgs e)
+    {
+        base.OnDeactivate(e);
+        _caption.Active = false;
+    }
+
+    // ---------------------------------------------------------------- tray / hotkey / close-to-tray
+
+    private void CreateTray()
+    {
+        _trayShowItem = new ToolStripMenuItem("显示 iCloud Desk", null, (_, _) => ShowFromTray())
+        {
+            Font = new Font(SystemFonts.MenuFont ?? Control.DefaultFont, FontStyle.Bold),
+            ShortcutKeyDisplayString = ToggleHotkeyText,
+        };
+        var closeToTray = new ToolStripMenuItem("关闭窗口时隐藏到托盘") { Checked = _settings.CloseToTray, CheckOnClick = true };
+        closeToTray.CheckedChanged += (_, _) =>
+        {
+            _settings.CloseToTray = closeToTray.Checked;
+            _settings.Save();
+        };
+        var menu = new ContextMenuStrip();
+        menu.Items.AddRange([_trayShowItem, closeToTray, new ToolStripSeparator(), new ToolStripMenuItem("退出", null, (_, _) => ExitApp())]);
+
+        _tray = new NotifyIcon { Icon = AppIcon.Get(16) ?? Icon, Text = AppPaths.AppTitle, ContextMenuStrip = menu, Visible = true };
+        _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ShowFromTray(); };
+        _tray.BalloonTipClicked += (_, _) => ShowFromTray();
+    }
+
+    private void RegisterToggleHotkey()
+    {
+        _hotkeyRegistered = Native.RegisterHotKey(Handle, ToggleHotkeyId, Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT, (uint)Keys.R);
+        if (!_hotkeyRegistered)
+            Log.Error($"RegisterHotKey({ToggleHotkeyText}) failed: {Marshal.GetLastWin32Error()} (already used by another app?)");
+        if (_trayShowItem is not null)
+            _trayShowItem.ShortcutKeyDisplayString = _hotkeyRegistered ? ToggleHotkeyText : $"{ToggleHotkeyText}（被占用）";
+    }
+
+    private void ToggleFromHotkey()
+    {
+        bool onScreen = Visible && WindowState != FormWindowState.Minimized;
+        if (onScreen && Native.GetForegroundWindow() == Handle) HideToTray();
+        else ShowFromTray();
+    }
+
+    private void HideToTray()
+    {
+        if (!Visible) return;
+        SavePlacement();
+        Hide();
+        if (!_settings.TrayHintShown && _tray is not null)
+        {
+            _settings.TrayHintShown = true;
+            _settings.Save();
+            _tray.ShowBalloonTip(5000, "iCloud Desk 仍在后台运行",
+                $"点击托盘图标或按 {ToggleHotkeyText} 重新打开。右键托盘图标可以退出或更改关闭行为。", ToolTipIcon.None);
+        }
+    }
+
+    public void ShowFromTray()
+    {
+        if (IsDisposed) return;
+        if (!Visible) Show();
+        if (WindowState == FormWindowState.Minimized || Native.IsIconic(Handle))
+            Native.ShowWindow(Handle, Native.SW_RESTORE);
+        Activate();
+        Native.SetForegroundWindow(Handle);
+    }
+
+    private void ExitApp()
+    {
+        _exiting = true;
+        Close();
     }
 
     // ---------------------------------------------------------------- window placement
@@ -98,12 +248,14 @@ internal sealed class MainForm : Form
     {
         base.OnResize(e);
         if (WindowState != FormWindowState.Minimized) _lastVisibleState = WindowState;
+        LayoutCaption();
     }
 
     protected override void OnDpiChanged(DpiChangedEventArgs e)
     {
         base.OnDpiChanged(e);
         MinimumSize = ScaleLogical(MinLogicalSize, e.DeviceDpiNew);
+        LayoutCaption();
     }
 
     // ---------------------------------------------------------------- lifecycle
@@ -112,18 +264,39 @@ internal sealed class MainForm : Form
     {
         base.OnHandleCreated(e);
         Native.ApplyTitleBar(Handle, _theme.Dark, _captionColor);
+        // Re-run WM_NCCALCSIZE so the caption removal applies to the initial frame too.
+        Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0,
+            Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE | Native.SWP_FRAMECHANGED);
+        RegisterToggleHotkey();
+    }
+
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        if (_hotkeyRegistered) Native.UnregisterHotKey(Handle, ToggleHotkeyId);
+        _hotkeyRegistered = false;
+        base.OnHandleDestroyed(e);
     }
 
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        LayoutCaption();
         _ = StartAsync();
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        // Caption ✕, Alt+F4 and taskbar close arrive as UserClosing. Task Manager / external WM_CLOSE,
+        // Windows shutdown and the installer's --quit really exit.
+        if (!_exiting && e.CloseReason == CloseReason.UserClosing && _settings.CloseToTray)
+        {
+            e.Cancel = true;
+            HideToTray();
+            return;
+        }
         // The daemon keeps running on purpose: CLI users rely on it and it has its own idle timeout.
-        SavePlacement();
+        if (Visible) SavePlacement();
+        if (_tray is not null) _tray.Visible = false;
         base.OnFormClosing(e);
     }
 
@@ -134,7 +307,8 @@ internal sealed class MainForm : Form
             SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
             _lifetime.Cancel();
             _splashFallback.Dispose();
-            _notifyIcon?.Dispose();
+            _tray?.ContextMenuStrip?.Dispose();
+            _tray?.Dispose();
             _webView?.Dispose();
         }
         base.Dispose(disposing);
@@ -151,14 +325,10 @@ internal sealed class MainForm : Form
                 if (options.Quit)
                 {
                     Log.Info("Quit requested by another process");
-                    Close();
+                    ExitApp();
                     return;
                 }
-                if (WindowState == FormWindowState.Minimized || Native.IsIconic(Handle))
-                    Native.ShowWindow(Handle, Native.SW_RESTORE);
-                Show();
-                Activate();
-                Native.SetForegroundWindow(Handle);
+                ShowFromTray();
             });
         }
         catch (InvalidOperationException)
@@ -344,7 +514,7 @@ internal sealed class MainForm : Form
         s.AreBrowserAcceleratorKeysEnabled = true;
         s.IsBuiltInErrorPageEnabled = true;
 
-        var shellInfo = JsonSerializer.Serialize(new { version = AppPaths.Version, platform = "windows", debug = _options.Debug });
+        var shellInfo = JsonSerializer.Serialize(new { version = AppPaths.Version, platform = "windows", debug = _options.Debug, chrome = "custom" });
         await core.AddScriptToExecuteOnDocumentCreatedAsync(
             $"try {{ Object.defineProperty(window, '__ICD_SHELL__', {{ value: Object.freeze({shellInfo}), configurable: false }}); }} catch (e) {{}}");
 
@@ -495,6 +665,7 @@ internal sealed class MainForm : Form
         _theme = caption is Color bg ? theme with { Background = bg } : theme;
         _captionColor = caption;
         BackColor = _theme.Background;
+        _caption.ApplyTheme(_theme, caption ?? DefaultCaptionColor(_theme.Dark));
         _splash.ApplyTheme(_theme);
         _error.ApplyTheme(_theme);
         if (_webView is not null) _webView.DefaultBackgroundColor = _theme.Background;
@@ -511,12 +682,14 @@ internal sealed class MainForm : Form
             _fullScreen = true;
             WindowState = FormWindowState.Normal;
             FormBorderStyle = FormBorderStyle.None;
+            LayoutCaption();
             Bounds = Screen.FromControl(this).Bounds;
         }
         else
         {
             _fullScreen = false;
             FormBorderStyle = FormBorderStyle.Sizable;
+            LayoutCaption();
             Bounds = _preFullScreenBounds;
             WindowState = _preFullScreenState;
             Native.ApplyTitleBar(Handle, _theme.Dark, _captionColor);
@@ -525,17 +698,7 @@ internal sealed class MainForm : Form
 
     private void ShowNotification(string? title, string? body)
     {
-        if (string.IsNullOrWhiteSpace(title) && string.IsNullOrWhiteSpace(body)) return;
-        if (_notifyIcon is null)
-        {
-            _notifyIcon = new NotifyIcon { Icon = Icon, Text = AppPaths.AppTitle };
-            _notifyIcon.BalloonTipClosed += (_, _) => _notifyIcon.Visible = false;
-        }
-        _notifyIcon.BalloonTipClicked -= OnBalloonClicked;
-        _notifyIcon.BalloonTipClicked += OnBalloonClicked;
-        _notifyIcon.Visible = true;
-        _notifyIcon.ShowBalloonTip(5000, string.IsNullOrWhiteSpace(title) ? AppPaths.AppTitle : title!, body ?? "", ToolTipIcon.None);
+        if (_tray is null || (string.IsNullOrWhiteSpace(title) && string.IsNullOrWhiteSpace(body))) return;
+        _tray.ShowBalloonTip(5000, string.IsNullOrWhiteSpace(title) ? AppPaths.AppTitle : title!, body ?? "", ToolTipIcon.None);
     }
-
-    private void OnBalloonClicked(object? sender, EventArgs e) => OnSecondInstance(new LaunchOptions(false, false, false));
 }

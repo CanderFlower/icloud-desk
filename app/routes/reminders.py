@@ -2,16 +2,31 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter
 from pydantic import BaseModel
+from tzlocal import get_localzone_name
 
 from .common import dump, parse_dt, run
 
 router = APIRouter(prefix="/api/reminders", tags=["reminders"])
 
 _HIDDEN = {"server_title", "server_desc", "early_reminder_account_id", "undecodable_text_fields"}
+
+
+def _parse_due(value: str | None, all_day: bool = False) -> datetime | None:
+    dt = parse_dt(value)
+    if dt is None:
+        return None
+    if all_day:
+        return dt.replace(tzinfo=None)
+    local_tz = ZoneInfo(get_localzone_name())
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=local_tz)
+    return dt.astimezone(local_tz)
 
 
 class ReminderCreate(BaseModel):
@@ -65,7 +80,7 @@ def create(body: ReminderCreate):
             list_id=body.list_id,
             title=body.title,
             desc=body.desc,
-            due_date=parse_dt(body.due_date),
+            due_date=_parse_due(body.due_date, body.all_day),
             priority=body.priority,
             flagged=body.flagged,
             all_day=body.all_day,
@@ -92,8 +107,10 @@ def update(rid: str, body: ReminderPatch):
                 setattr(rem, field, value)
         if body.clear_due_date:
             rem.due_date = None
+            rem.time_zone = None
         elif body.due_date:
-            rem.due_date = parse_dt(body.due_date)
+            rem.due_date = _parse_due(body.due_date, bool(rem.all_day))
+            rem.time_zone = None if rem.all_day else get_localzone_name()
         svc.update(rem)
         return _out(rem)
 
