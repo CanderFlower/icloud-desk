@@ -102,6 +102,17 @@ function layoutColumn(list) {
   return out;
 }
 
+export function pickDefaultCal(writableCals, hiddenGuids, lastGuid) {
+  const w = writableCals || [];
+  const hidden = hiddenGuids instanceof Set ? hiddenGuids : new Set(hiddenGuids || []);
+  return (
+    (lastGuid && w.find((c) => c.guid === lastGuid)) ||
+    w.find((c) => c.is_default && !hidden.has(c.guid)) ||
+    w.find((c) => !hidden.has(c.guid)) ||
+    w[0]
+  )?.guid;
+}
+
 export default {
   id: 'calendar',
   get title() { return tx('日历', 'Calendar'); },
@@ -344,11 +355,21 @@ export default {
     function toggleCal(guid) { S.hidden.has(guid) ? S.hidden.delete(guid) : S.hidden.add(guid); saveHidden(); }
     function saveHidden() { store.set('cal.hidden', [...S.hidden]); renderCals(); render(); }
     function calMenu(at, c) {
+      const isDef = !c.read_only && defaultCal() === c.guid;
       menu(at, [
         { label: tx('仅显示此日历', 'Show Only This Calendar'), icon: 'eye', onClick: () => { S.hidden = new Set(S.cals.filter((x) => x.guid !== c.guid).map((x) => x.guid)); saveHidden(); } },
         { label: tx('显示全部日历', 'Show All Calendars'), icon: 'layers', onClick: () => { S.hidden.clear(); saveHidden(); } },
         '-',
         { label: tx('在此日历中新建日程', 'New Event in Calendar'), icon: 'calendar-plus', disabled: c.read_only, onClick: () => newAt(null, { pguid: c.guid }) },
+        {
+          label: tx('设为默认日历', 'Set as Default Calendar'),
+          checked: isDef,
+          disabled: c.read_only,
+          onClick: () => {
+            store.set('cal.lastCal', c.guid);
+            toast(tx(`已将“${c.title}”设为默认新建日历`, `“${c.title}” set as default calendar`), 'success', 1800);
+          },
+        },
         { label: tx('删除日历…', 'Delete Calendar…'), icon: 'trash-2', danger: true, disabled: c.read_only || c.is_default, onClick: () => removeCalendar(c) },
       ]);
     }
@@ -834,8 +855,7 @@ export default {
 
     // ------------------------------------------------------------- editor
     function defaultCal() {
-      const w = writable();
-      return (w.find((c) => c.is_default && !S.hidden.has(c.guid)) || w.find((c) => !S.hidden.has(c.guid)) || w[0])?.guid;
+      return pickDefaultCal(writable(), S.hidden, store.get('cal.lastCal', null));
     }
     function startOn(d) {
       const now = new Date();
@@ -937,6 +957,7 @@ export default {
         if (isNew) {
           body.etag = null;
           await post('/api/calendar/events', body);
+          store.set('cal.lastCal', body.pguid);
           store.set('cal.alarm', alarm);
         } else {
           await put(`/api/calendar/events/${enc(ev.pguid)}/${enc(ev.guid)}`, body);

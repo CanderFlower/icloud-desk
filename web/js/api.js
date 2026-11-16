@@ -128,4 +128,4 @@ export const connection = {
 };
 
 // Keep the daemon's idle timer alive while a window is open.
-setInterval(() => { if (!connection.down && document.visibilityState === 'visible') fetch('/api/ping').catch(() => connection.lost()); }, 5 * 60 * 1000);
+setInterval(() => { if (!connection.down && document.visibilityState === 'visible') fetch('/api/ping').catch(() => connection.lost()); }, 5 * 60 * 1000)?.unref?.();
