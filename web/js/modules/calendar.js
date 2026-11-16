@@ -79,9 +79,24 @@ function lanes(items) {
   return occ.length;
 }
 
-/** Side-by-side layout of overlapping timed events in one day column. */
-function layoutColumn(list) {
-  const items = list.map((ev) => ({ ev, s: +ev.s, e: Math.max(+ev.e, +ev.s + 20 * 60000) })).sort((a, b) => a.s - b.s || b.e - a.e);
+/** Side-by-side layout of overlapping timed events (including cross-midnight slices) in one day column. */
+export function dayTimedLayout(evs, day) {
+  const d = sod(day);
+  const dNext = addDays(d, 1);
+  const list = (evs || []).filter((ev) => !ev.all_day && ev.s < dNext && (ev.e > d || (+ev.e === +ev.s && ev.s >= d)));
+  const items = list.map((ev) => {
+    const segS = Math.max(+ev.s, +d);
+    const segE = Math.min(Math.max(+ev.e, +ev.s), +dNext);
+    return {
+      ev,
+      s: segS,
+      e: Math.max(segE, segS + 20 * 60000),
+      startMin: (segS - d) / 60000,
+      endMin: (segE - d) / 60000,
+      contStart: ev.s < d,
+      contEnd: ev.e > dNext,
+    };
+  }).sort((a, b) => a.s - b.s || b.e - a.e);
   const out = [];
   let cluster = []; let end = 0;
   const flush = () => {
@@ -514,7 +529,7 @@ export default {
       if (st && en) return [h('span', {}, fmt.time(ev.s)), h('span', { class: 'end' }, fmt.time(ev.e))];
       if (st) return [h('span', {}, fmt.time(ev.s)), h('span', { class: 'end' }, tx('开始', 'Starts'))];
       if (en) return [h('span', {}, tx('截至', 'Ends')), h('span', { class: 'end' }, fmt.time(ev.e))];
-      return [h('span', {}, tx('全天', 'All day'))];
+      return [h('span', {}, '00:00'), h('span', { class: 'end' }, '24:00')];
     }
     function agendaRow(ev, d, onOpen) {
       const row = h('div', {
@@ -563,7 +578,7 @@ export default {
       const evs = visible();
       const d0 = days[0]; const d1 = addDays(days[n - 1], 1);
 
-      const bars = evs.filter((ev) => isBar(ev) && ev.s < d1 && ev.e > d0).sort(order)
+      const bars = evs.filter((ev) => ev.all_day && ev.s < d1 && ev.e > d0).sort(order)
         .map((ev) => ({ ev, a: Math.max(0, dayDiff(d0, ev.s)), b: Math.min(n - 1, dayDiff(d0, lastDay(ev))) }));
       const laneN = lanes(bars);
       const allGrid = h('div', {
@@ -589,8 +604,7 @@ export default {
 
       const cols = days.map((d) => {
         const col = h('div', { class: `tg-col${same(d, today) ? ' today' : ''}${d.getDay() % 6 === 0 ? ' we' : ''}` });
-        const timed = evs.filter((ev) => !isBar(ev) && same(ev.s, d));
-        for (const it of layoutColumn(timed)) col.append(timedItem(it.ev, d, it.col, it.cols));
+        for (const it of dayTimedLayout(evs, d)) col.append(timedItem(it, d));
         if (same(d, today)) col.append(h('div', { class: 'tg-now' }));
         return col;
       });
@@ -606,7 +620,7 @@ export default {
       if (keep !== null) scroll.scrollTop = keep;
       else {
         const hasToday = days.some((d) => same(d, today));
-        const first = evs.filter((ev) => !isBar(ev) && ev.s >= d0 && ev.s < d1).reduce((m, ev) => Math.min(m, ev.s.getHours()), 24);
+        const first = days.flatMap((d) => dayTimedLayout(evs, d)).reduce((m, it) => Math.min(m, it.startMin / 60), 24);
         const hour = hasToday ? new Date().getHours() - 2 : Math.min(7.5, first - 0.5);
         scroll.scrollTop = Math.max(0, hour) * HOUR;
       }
@@ -614,24 +628,25 @@ export default {
       gridPointer(grid, days);
     }
 
-    function timedItem(ev, d, ci, cols) {
-      const a = (ev.s - d) / 60000; const b = Math.min(1440, (ev.e - d) / 60000);
-      const height = Math.max(((b - a) / 60) * HOUR, 18);
+    function timedItem({ ev, startMin, endMin, contStart, contEnd, col: ci, cols }, d) {
+      const height = Math.max(((endMin - startMin) / 60) * HOUR, 18);
       const short = height < 36;
       const editable = canEdit(ev);
+      const shortTime = contStart ? `– ${fmt.time(ev.e)}` : fmt.time(ev.s);
       const it = h('div', {
-        class: `tg-ev${short ? ' short' : ''}${S.sel === ev.guid ? ' sel' : ''}${editable ? ' editable' : ''}`,
+        class: `tg-ev${short ? ' short' : ''}${contStart ? ' cont-start' : ''}${contEnd ? ' cont-end' : ''}${S.sel === ev.guid ? ' sel' : ''}${editable ? ' editable' : ''}`,
         tabindex: '0', dataset: { guid: ev.guid },
-        style: { top: `${(a / 60) * HOUR}px`, height: `${height - 2}px`, left: `calc(${(ci / cols) * 100}% + 1px)`, width: `calc(${100 / cols}% - 3px)`, '--c': colorOf(ev) },
+        style: { top: `${(startMin / 60) * HOUR}px`, height: `${height - 2}px`, left: `calc(${(ci / cols) * 100}% + 1px)`, width: `calc(${100 / cols}% - 3px)`, '--c': colorOf(ev) },
         title: `${ev.title || untitled()}\n${whenText(ev)}${ev.location ? `\n${ev.location}` : ''}`,
         onkeydown: (e) => keyOnEvent(e, ev, it),
         oncontextmenu: (e) => eventMenu(e, ev),
       },
-      h('div', { class: 't' }, ev.title || untitled(), short ? h('span', { class: 'tm' }, fmt.time(ev.s)) : null),
+      h('div', { class: 't' }, ev.title || untitled(), short ? h('span', { class: 'tm' }, shortTime) : null),
       short ? null : h('div', { class: 'tm' }, `${fmt.time(ev.s)} – ${fmt.time(ev.e)}`),
       !short && ev.location && height > 60 ? h('div', { class: 'loc' }, ev.location) : null,
-      editable ? h('div', { class: 'tg-resize' }) : null);
+      editable && !contEnd ? h('div', { class: 'tg-resize' }) : null);
       it._ev = ev;
+      it._day = d;
       return it;
     }
 
@@ -648,11 +663,11 @@ export default {
       const colEls = () => [...grid.querySelectorAll('.tg-col')];
       const minuteAt = (y) => clamp(snap(((y - grid.getBoundingClientRect().top) / HOUR) * 60), 0, 1440);
       const colAtX = (x) => { const cs = colEls(); const i = cs.findIndex((c) => x < c.getBoundingClientRect().right); return i < 0 ? n - 1 : i; };
-      const place = (node, s, e) => {
-        const top = ((s.getHours() * 60 + s.getMinutes()) / 60) * HOUR;
-        const mins = Math.max(SNAP, (e - s) / 60000);
-        node.style.top = `${top}px`;
-        node.style.height = `${Math.max((Math.min(mins, 1440 - (top / HOUR) * 60) / 60) * HOUR, 18) - 2}px`;
+      const place = (node, s, e, colDay = sod(s)) => {
+        const segStart = Math.max(0, (s - colDay) / 60000);
+        const segEnd = Math.min(1440, Math.max(segStart + SNAP, (e - colDay) / 60000));
+        node.style.top = `${(segStart / 60) * HOUR}px`;
+        node.style.height = `${Math.max(((segEnd - segStart) / 60) * HOUR, 18) - 2}px`;
         const tm = node.querySelector('.tm'); if (tm) tm.textContent = node.classList.contains('short') ? fmt.time(s) : `${fmt.time(s)} – ${fmt.time(e)}`;
       };
 
@@ -681,14 +696,17 @@ export default {
               const day = addDays(sod(ev.s), dc);
               const startMin = clamp(ev.s.getHours() * 60 + ev.s.getMinutes() + (minuteAt(m.clientY) - m0), 0, 1440 - SNAP);
               ns = addMin(day, startMin); ne = addMin(ns, dur);
-              const target = colEls()[clamp(dayDiff(days[0], day), 0, n - 1)];
+              const targetIdx = clamp(dayDiff(days[0], day), 0, n - 1);
+              const target = colEls()[targetIdx];
               if (evEl.parentNode !== target) target.append(evEl);
               evEl.style.left = '1px'; evEl.style.width = 'calc(100% - 3px)';
+              place(evEl, ns, ne, days[targetIdx]);
             } else {
-              const base = sod(ev.s); const startMin = ev.s.getHours() * 60 + ev.s.getMinutes();
-              ne = addMin(base, Math.max(startMin + SNAP, minuteAt(m.clientY)));
+              const endDay = days[n > 1 ? colAtX(m.clientX) : c0];
+              ne = addMin(endDay, minuteAt(m.clientY));
+              if (ne <= addMin(ev.s, SNAP)) ne = addMin(ev.s, SNAP);
+              place(evEl, ns, ne, days[c0]);
             }
-            place(evEl, ns, ne);
           };
           onUp = () => {
             document.body.classList.remove('cal-dragging');
