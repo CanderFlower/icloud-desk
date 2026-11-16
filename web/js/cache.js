@@ -6,7 +6,11 @@ const MAX_ENTRIES = 80;
 const MAX_BYTES = 2 * 1024 * 1024;
 
 class CacheInvalidatedError extends Error {
-  constructor() { super('请求期间数据已改变，请重试'); }
+  constructor() {
+    super(globalThis.document?.documentElement?.lang === 'en'
+      ? 'Data changed during the request, please try again'
+      : '请求期间数据已改变，请重试');
+  }
 }
 
 export class ResponseCache {

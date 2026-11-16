@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from ..config import DATA_DIR
+from ..i18n import tr
 from ..icloud import icloud
 from .common import iso, run
 
@@ -80,7 +81,7 @@ def albums():
         for key, album in _albums(api).items():
             out.append({
                 "id": key,
-                "name": "图库" if key == "__all__" else album.name,
+                "name": tr("图库", "Library") if key == "__all__" else album.name,
                 "kind": type(album).__name__,
             })
         return out
@@ -93,7 +94,7 @@ def list_photos(album: str = "__all__", offset: int = 0, limit: int = 60):
     def _do(api: Any) -> dict[str, Any]:
         alb = _albums(api).get(album)
         if alb is None:
-            raise HTTPException(404, "相簿不存在")
+            raise HTTPException(404, tr("相簿不存在", "Album not found"))
         st = _state()
         page = st["pages"].get(album)
         if page is None or offset == 0:
@@ -119,7 +120,7 @@ def list_photos(album: str = "__all__", offset: int = 0, limit: int = 60):
 def _asset(photo_id: str) -> Any:
     asset = _state()["assets"].get(photo_id)
     if asset is None:
-        raise HTTPException(404, "照片未加载，请刷新相簿")
+        raise HTTPException(404, tr("照片未加载，请刷新相簿", "Photo not loaded; please refresh the album"))
     return asset
 
 
@@ -127,7 +128,7 @@ def _asset(photo_id: str) -> Any:
 def photo_file(id: str, version: str = "thumb", download: bool = False):
     photo_id = id
     if version not in {"thumb", "medium", "original"}:
-        raise HTTPException(400, "version 只能是 thumb / medium / original")
+        raise HTTPException(400, tr("version 只能是 thumb / medium / original", "version must be thumb, medium, or original"))
     asset = _asset(photo_id)
     key = hashlib.sha1(f"{photo_id}:{version}".encode()).hexdigest()
     cache_file = THUMB_DIR / key
@@ -159,7 +160,7 @@ def photo_file(id: str, version: str = "thumb", download: bool = False):
     if data is None:
         data = run(_do)
     if data is None:
-        raise HTTPException(404, "该版本不可用")
+        raise HTTPException(404, tr("该版本不可用", "Requested version is unavailable"))
     if version != "original":
         cache_file.write_bytes(data)
     headers = {}

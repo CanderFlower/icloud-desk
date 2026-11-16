@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from pyicloud.services.drive import CLOUD_DOCS_ZONE_ID_ROOT, CLOUD_DOCS_ZONE_ID_TRASH, DriveNode
 
+from ..i18n import tr
 from ..icloud import icloud
 from .common import run
 
@@ -54,7 +55,7 @@ def _node_data(drivewsid: str) -> dict[str, Any]:
 
         data = run(_load)
         if not data or data.get("drivewsid") != drivewsid:
-            raise HTTPException(404, "找不到该文件，请刷新目录后重试")
+            raise HTTPException(404, tr("找不到该文件，请刷新目录后重试", "File not found. Refresh the folder and try again."))
     return data
 
 
@@ -90,7 +91,7 @@ def _list(api: Any, drivewsid: str) -> dict[str, Any]:
     return {
         "folder": {
             "id": data.get("drivewsid"),
-            "name": _full_name(data) or ("iCloud 云盘" if drivewsid == CLOUD_DOCS_ZONE_ID_ROOT else ""),
+            "name": _full_name(data) or (tr("iCloud 云盘", "iCloud Drive") if drivewsid == CLOUD_DOCS_ZONE_ID_ROOT else ""),
             "parent": data.get("parentId"),
             "type": (data.get("type") or "folder").lower(),
         },

@@ -57,7 +57,7 @@ internal sealed class SplashView : Control
     private Bitmap? _icon;
     private int _iconDpi;
     private float _angle;
-    private string _status = "正在启动 iCloud Desk…";
+    private string _status = I18n.Tr("正在启动 iCloud Desk…", "Starting iCloud Desk…");
 
     public SplashView(ThemeColors theme)
     {
@@ -191,9 +191,9 @@ internal sealed class ErrorView : UserControl
         _logs = new LinkLabel { AutoSize = true, Anchor = AnchorStyles.Top, Font = new Font("Microsoft YaHei UI", 9f), Margin = new Padding(0, 0, 0, 16) };
         _logs.LinkClicked += (_, _) => Shell.OpenFolder(AppPaths.LogsDir);
 
-        _retry = MakeButton("重试", primary: true);
+        _retry = MakeButton(I18n.Tr("重试", "Retry"), primary: true);
         _retry.Click += (_, _) => RetryClicked?.Invoke(this, EventArgs.Empty);
-        _close = MakeButton("关闭", primary: false);
+        _close = MakeButton(I18n.Tr("关闭", "Close"), primary: false);
         _close.Click += (_, _) => FindForm()?.Close();
         var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Anchor = AnchorStyles.Top, WrapContents = false, Margin = new Padding(0) };
         buttons.Controls.Add(_retry);
@@ -228,9 +228,16 @@ internal sealed class ErrorView : UserControl
         _linkUrl = linkUrl;
         _link.Text = linkText ?? "";
         _link.Visible = linkUrl is not null;
-        _logs.Text = $"日志文件夹：{AppPaths.LogsDir}";
+        UpdateLanguage();
         CenterLayout();
         _retry.Focus();
+    }
+
+    public void UpdateLanguage()
+    {
+        _retry.Text = I18n.Tr("重试", "Retry");
+        _close.Text = I18n.Tr("关闭", "Close");
+        _logs.Text = I18n.Tr($"日志文件夹：{AppPaths.LogsDir}", $"Log folder: {AppPaths.LogsDir}");
     }
 
     public void ApplyTheme(ThemeColors theme)

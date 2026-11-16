@@ -61,8 +61,10 @@ internal static class CoreLauncher
         var existing = await TryReuseAsync(demo, ct);
         if (existing is not null) return existing;
         var cmd = Locate() ?? throw new CoreLaunchException(
-            "找不到 iCloud Desk 核心组件 (icd.exe)。",
-            $"在 {AppContext.BaseDirectory} 中没有找到 icd.exe。请重新安装 iCloud Desk。");
+            I18n.Tr("找不到 iCloud Desk 核心组件 (icd.exe)。", "Could not find the iCloud Desk core (icd.exe)."),
+            I18n.Tr(
+                $"在 {AppContext.BaseDirectory} 中没有找到 icd.exe。请重新安装 iCloud Desk。",
+                $"icd.exe was not found in {AppContext.BaseDirectory}. Please reinstall iCloud Desk."));
 
         var psi = new ProcessStartInfo
         {
@@ -93,7 +95,7 @@ internal static class CoreLauncher
         }
         catch (Exception ex)
         {
-            throw new CoreLaunchException("无法启动 iCloud Desk 核心组件。", $"{cmd.FileName}\n{ex.Message}");
+            throw new CoreLaunchException(I18n.Tr("无法启动 iCloud Desk 核心组件。", "Failed to launch the iCloud Desk core."), $"{cmd.FileName}\n{ex.Message}");
         }
         proc.StandardInput.Close();
 
@@ -114,7 +116,7 @@ internal static class CoreLauncher
         {
             try { proc.Kill(entireProcessTree: false); } catch { /* already gone */ }
             ct.ThrowIfCancellationRequested();
-            throw new CoreLaunchException("启动 iCloud Desk 服务超时。", Tail(stderr));
+            throw new CoreLaunchException(I18n.Tr("启动 iCloud Desk 服务超时。", "Timed out starting the iCloud Desk service."), Tail(stderr));
         }
         await Task.WhenAny(Task.WhenAll(outTask, errTask), Task.Delay(1000, CancellationToken.None)).ConfigureAwait(false);
 
@@ -126,7 +128,7 @@ internal static class CoreLauncher
         if (proc.ExitCode != 0)
         {
             Log.Error($"daemon ensure failed: {errText.Trim()} {outText.Trim()}");
-            throw new CoreLaunchException("iCloud Desk 服务未能启动。", Tail(errText.Length > 0 ? errText : outText));
+            throw new CoreLaunchException(I18n.Tr("iCloud Desk 服务未能启动。", "The iCloud Desk service failed to start."), Tail(errText.Length > 0 ? errText : outText));
         }
 
         // Contract is one JSON line, but accept pretty-printed output (or leading log noise) too.
@@ -152,7 +154,7 @@ internal static class CoreLauncher
         if (info is null || !IsLoopback(info.UiUrl))
         {
             Log.Error($"Unexpected output from daemon ensure: {outText}");
-            throw new CoreLaunchException("iCloud Desk 服务返回了无法识别的信息。", Tail(outText + "\n" + errText));
+            throw new CoreLaunchException(I18n.Tr("iCloud Desk 服务返回了无法识别的信息。", "The iCloud Desk service returned an unrecognized response."), Tail(outText + "\n" + errText));
         }
         Log.Info($"Daemon ready: pid={info.Pid} port={info.Port} demo={info.Demo} version={info.Version}");
         return info;

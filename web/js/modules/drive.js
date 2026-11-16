@@ -3,6 +3,7 @@
 // (onto the pane or a folder), drag-to-move, inline rename, quick look (Space), trash with undo,
 // app libraries, upload progress panel.
 import { get, cachedGet, peekCache, post, upload as sendForm } from '../api.js';
+import { countText, lang, tx } from '../i18n.js';
 import {
   h, clear, icon, btn, iconBtn, segmented, searchBox, toast, toastError, empty, errorBox, modal,
   confirmDialog, promptDialog, menu, fmt, toDate, store, download, copyText, pickFiles, isTyping, spinner,
@@ -10,30 +11,30 @@ import {
 
 const ROOT = 'FOLDER::com.apple.CloudDocs::root';
 const DRAG_MIME = 'application/x-icd-drive';
-const LOCS = {
-  drive: { name: 'iCloud 云盘', icon: 'cloud' },
-  apps: { name: 'App 文件夹', icon: 'layout-grid' },
-  trash: { name: '最近删除', icon: 'trash-2' },
-};
+const getLocs = () => ({
+  drive: { name: tx('iCloud 云盘', 'iCloud Drive'), icon: 'cloud' },
+  apps: { name: tx('App 文件夹', 'App Libraries'), icon: 'layout-grid' },
+  trash: { name: tx('最近删除', 'Recently Deleted'), icon: 'trash-2' },
+});
 
 // ------------------------------------------------------------------ file types
 const words = (s) => s.split(' ');
 const GROUPS = {
-  pdf: { color: '#e5483d', glyph: 'file-text', exts: { pdf: 'PDF 文稿' } },
-  doc: { color: '#2f6fde', glyph: 'file-text', exts: { doc: 'Word 文稿', docx: 'Word 文稿', pages: 'Pages 文稿', rtf: 'RTF 文稿', odt: 'OpenDocument 文稿' } },
-  sheet: { color: '#1e9b57', glyph: 'file-spreadsheet', exts: { xls: 'Excel 表格', xlsx: 'Excel 表格', numbers: 'Numbers 表格', csv: 'CSV 表格', tsv: 'TSV 表格', ods: 'OpenDocument 表格' } },
-  slide: { color: '#ef7d1a', glyph: 'presentation', exts: { ppt: 'PowerPoint 演示文稿', pptx: 'PowerPoint 演示文稿', key: 'Keynote 演示文稿', odp: 'OpenDocument 演示文稿' } },
-  image: { color: '#1ba6c9', glyph: 'file-image', exts: words('jpg jpeg png gif webp heic heif bmp svg tif tiff ico avif'), label: '图像' },
-  video: { color: '#5e5ce6', glyph: 'file-video', exts: words('mp4 mov m4v avi mkv webm wmv flv'), label: '影片' },
-  audio: { color: '#ff2d55', glyph: 'file-audio', exts: words('mp3 m4a wav aac flac ogg aiff wma'), label: '音频' },
-  archive: { color: '#8a7456', glyph: 'file-archive', exts: words('zip rar 7z tar gz tgz bz2 xz dmg iso'), label: '归档' },
-  code: { color: '#4b5563', glyph: 'file-code', exts: words('js mjs ts jsx tsx py java c cpp h hpp cs go rs rb php sh ps1 bat html htm css scss json xml yml yaml toml sql swift kt lua'), label: '源代码' },
-  text: { color: '#8e8e93', glyph: 'file-text', exts: { txt: '纯文本', md: 'Markdown 文稿', log: '日志文件', ini: '配置文件' } },
+  pdf: { color: '#e5483d', glyph: 'file-text', exts: { pdf: ['PDF 文稿', 'PDF Document'] } },
+  doc: { color: '#2f6fde', glyph: 'file-text', exts: { doc: ['Word 文稿', 'Word Document'], docx: ['Word 文稿', 'Word Document'], pages: ['Pages 文稿', 'Pages Document'], rtf: ['RTF 文稿', 'RTF Document'], odt: ['OpenDocument 文稿', 'OpenDocument Text'] } },
+  sheet: { color: '#1e9b57', glyph: 'file-spreadsheet', exts: { xls: ['Excel 表格', 'Excel Spreadsheet'], xlsx: ['Excel 表格', 'Excel Spreadsheet'], numbers: ['Numbers 表格', 'Numbers Spreadsheet'], csv: ['CSV 表格', 'CSV Table'], tsv: ['TSV 表格', 'TSV Table'], ods: ['OpenDocument 表格', 'OpenDocument Spreadsheet'] } },
+  slide: { color: '#ef7d1a', glyph: 'presentation', exts: { ppt: ['PowerPoint 演示文稿', 'PowerPoint Presentation'], pptx: ['PowerPoint 演示文稿', 'PowerPoint Presentation'], key: ['Keynote 演示文稿', 'Keynote Presentation'], odp: ['OpenDocument 演示文稿', 'OpenDocument Presentation'] } },
+  image: { color: '#1ba6c9', glyph: 'file-image', exts: words('jpg jpeg png gif webp heic heif bmp svg tif tiff ico avif'), label: ['图像', 'Image'] },
+  video: { color: '#5e5ce6', glyph: 'file-video', exts: words('mp4 mov m4v avi mkv webm wmv flv'), label: ['影片', 'Video'] },
+  audio: { color: '#ff2d55', glyph: 'file-audio', exts: words('mp3 m4a wav aac flac ogg aiff wma'), label: ['音频', 'Audio'] },
+  archive: { color: '#8a7456', glyph: 'file-archive', exts: words('zip rar 7z tar gz tgz bz2 xz dmg iso'), label: ['归档', 'Archive'] },
+  code: { color: '#4b5563', glyph: 'file-code', exts: words('js mjs ts jsx tsx py java c cpp h hpp cs go rs rb php sh ps1 bat html htm css scss json xml yml yaml toml sql swift kt lua'), label: ['源代码', 'Source Code'] },
+  text: { color: '#8e8e93', glyph: 'file-text', exts: { txt: ['纯文本', 'Plain Text'], md: ['Markdown 文稿', 'Markdown Document'], log: ['日志文件', 'Log File'], ini: ['配置文件', 'Config File'] } },
 };
 const EXT = {};
 for (const [g, def] of Object.entries(GROUPS)) {
-  if (Array.isArray(def.exts)) for (const e of def.exts) EXT[e] = { g, label: `${e.toUpperCase()} ${def.label}` };
-  else for (const [e, label] of Object.entries(def.exts)) EXT[e] = { g, label };
+  if (Array.isArray(def.exts)) for (const e of def.exts) EXT[e] = { g, zh: `${e.toUpperCase()} ${def.label[0]}`, en: `${e.toUpperCase()} ${def.label[1]}` };
+  else for (const [e, [zh, en]] of Object.entries(def.exts)) EXT[e] = { g, zh, en };
 }
 
 const isFolder = (it) => it.type === 'folder' || it.type === 'app_library';
@@ -44,10 +45,11 @@ function extOf(it) {
   return i > 0 ? it.name.slice(i + 1).toLowerCase() : '';
 }
 function kindOf(it) {
-  if (it.type === 'app_library') return 'App 文件夹';
-  if (isFolder(it)) return '文件夹';
+  if (it.type === 'app_library') return tx('App 文件夹', 'App Library');
+  if (isFolder(it)) return tx('文件夹', 'Folder');
   const e = extOf(it);
-  return EXT[e]?.label || (e ? `${e.toUpperCase()} 文件` : '文稿');
+  if (EXT[e]) return tx(EXT[e].zh, EXT[e].en);
+  return e ? tx(`${e.toUpperCase()} 文件`, `${e.toUpperCase()} File`) : tx('文稿', 'Document');
 }
 function previewKind(it) {
   if (isFolder(it)) return null;
@@ -89,12 +91,12 @@ function fileIcon(it, { thumb = false } = {}) {
 function fmtDate(v) {
   const d = toDate(v); if (!d) return '—';
   const now = new Date(); const y = new Date(now); y.setDate(now.getDate() - 1);
-  if (fmt.sameDay(d, now)) return `今天 ${fmt.time(d)}`;
-  if (fmt.sameDay(d, y)) return `昨天 ${fmt.time(d)}`;
-  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日 ${fmt.time(d)}`;
+  if (fmt.sameDay(d, now)) return `${tx('今天', 'Today')} ${fmt.time(d)}`;
+  if (fmt.sameDay(d, y)) return `${tx('昨天', 'Yesterday')} ${fmt.time(d)}`;
+  if (d.getFullYear() === now.getFullYear()) return `${fmt.shortDate(d)} ${fmt.time(d)}`;
   return fmt.date(d);
 }
-const sizeText = (it) => (isFolder(it) ? (it.item_count != null ? `${it.item_count} 项` : '—') : fmt.bytes(it.size));
+const sizeText = (it) => (isFolder(it) ? (it.item_count != null ? countText(it.item_count, '项', 'item') : '—') : fmt.bytes(it.size));
 const tidy = (items) => {
   const out = [];
   for (const it of items.filter(Boolean)) {
@@ -108,9 +110,10 @@ const tidy = (items) => {
 // ------------------------------------------------------------------ module
 export default {
   id: 'drive',
-  title: 'iCloud 云盘',
+  get title() { return tx('iCloud 云盘', 'iCloud Drive'); },
   app: 'drive',
   mount(el) {
+    const LOCS = getLocs();
     let sort = store.get('drive.sort', { key: 'name', dir: 1 });
     if (typeof sort !== 'object' || !sort?.key) sort = { key: 'name', dir: 1 };
     const S = {
@@ -128,6 +131,7 @@ export default {
       query: '',
     };
     if (!Array.isArray(S.path) || !S.path.length) S.path = rootPath(S.loc);
+    else if (S.path[0]) S.path[0].name = LOCS[S.loc].name;
     let alive = true;
     let seq = 0;
     let dragIds = null;
@@ -143,17 +147,17 @@ export default {
     // ---- layout
     const sideList = h('div', { class: 'side-list dv-locs' });
     const crumbs = h('div', { class: 'dv-crumbs' });
-    const upBtn = iconBtn('chevron-left', '上一级 (Alt+↑)', () => goUp(), { cls: 'dv-up' });
-    const locBtn = iconBtn('cloud', '位置', (e) => locMenu(e.currentTarget), { cls: 'when-side-hidden' });
-    const search = searchBox({ placeholder: '搜索', oninput: (q) => { S.query = q.toLowerCase(); S.sel.clear(); render(); } });
+    const upBtn = iconBtn('chevron-left', tx('上一级 (Alt+↑)', 'Enclosing folder (Alt+↑)'), () => goUp(), { cls: 'dv-up' });
+    const locBtn = iconBtn('cloud', tx('位置', 'Locations'), (e) => locMenu(e.currentTarget), { cls: 'when-side-hidden' });
+    const search = searchBox({ placeholder: tx('搜索', 'Search'), oninput: (q) => { S.query = q.toLowerCase(); S.sel.clear(); render(); } });
     search.classList.add('dv-search');
     const viewSeg = segmented([
-      { value: 'grid', icon: 'layout-grid', tip: '图标视图' },
-      { value: 'list', icon: 'list', tip: '列表视图' },
+      { value: 'grid', icon: 'layout-grid', tip: tx('图标视图', 'Icon view') },
+      { value: 'list', icon: 'list', tip: tx('列表视图', 'List view') },
     ], S.view, (v) => setView(v), { cls: 'icons hide-narrow' });
     const dynTools = h('div', { class: 'dv-dyn' });
     const head = h('div', { class: 'toolbar dv-tb' },
-      h('button', { class: 'icon-btn menu-toggle', type: 'button', 'aria-label': '菜单', onclick: () => window.dispatchEvent(new Event('toggle-drawer')) }, icon('panel-left')),
+      h('button', { class: 'icon-btn menu-toggle', type: 'button', 'aria-label': tx('菜单', 'Menu'), onclick: () => window.dispatchEvent(new Event('toggle-drawer')) }, icon('panel-left')),
       upBtn, crumbs,
       h('div', { class: 'tools' }, locBtn, search, dynTools));
     const body = h('div', { class: 'pane-body dv-body', tabindex: 0 });
@@ -168,7 +172,7 @@ export default {
 
     // ---- side
     function renderSide() {
-      clear(sideList, h('div', { class: 'side-title' }, '位置'), Object.entries(LOCS).map(([k, v]) => {
+      clear(sideList, h('div', { class: 'side-title' }, tx('位置', 'Locations')), Object.entries(LOCS).map(([k, v]) => {
         const it = h('div', {
           class: `side-item ${S.loc === k ? 'active' : ''}`, tabindex: 0, role: 'button', dataset: { loc: k },
           onclick: () => goLoc(k), onkeydown: (e) => { if (e.key === 'Enter') goLoc(k); },
@@ -215,7 +219,7 @@ export default {
       const parts = [];
       if (n > 4) {
         parts.push(crumb(p[0], 0), sep(),
-          h('button', { class: 'dv-crumb more', type: 'button', 'data-tip': '更多位置',
+          h('button', { class: 'dv-crumb more', type: 'button', 'data-tip': tx('更多位置', 'More locations'),
             onclick: (e) => menu(e.currentTarget, p.slice(1, n - 2).map((x, j) => ({ label: x.name, icon: 'folder', onClick: () => goTo(j + 1) }))) }, '…'),
           sep(), crumb(p[n - 2], n - 2), sep(), crumb(p[n - 1], n - 1));
       } else p.forEach((x, i) => { if (i) parts.push(sep()); parts.push(crumb(x, i)); });
@@ -227,20 +231,20 @@ export default {
       const n = S.sel.size; const files = selItems().filter((i) => !isFolder(i));
       const t = [];
       if (S.loc === 'trash') {
-        t.push(iconBtn('archive-restore', n > 1 ? `恢复 ${n} 项` : '恢复', () => recover(selIds()), { disabled: !n }),
-          iconBtn('trash-2', '永久删除', () => deleteForever(selIds()), { disabled: !n }));
+        t.push(iconBtn('archive-restore', n > 1 ? tx(`恢复 ${n} 项`, `Recover ${n} Items`) : tx('恢复', 'Recover'), () => recover(selIds()), { disabled: !n }),
+          iconBtn('trash-2', tx('永久删除', 'Delete Immediately'), () => deleteForever(selIds()), { disabled: !n }));
       } else {
         if (writable()) {
-          const nf = iconBtn('folder-plus', '新建文件夹 (Ctrl+N)', () => newFolder(), { cls: 'hide-narrow' });
+          const nf = iconBtn('folder-plus', tx('新建文件夹 (Ctrl+N)', 'New folder (Ctrl+N)'), () => newFolder(), { cls: 'hide-narrow' });
           nf.dataset.new = '';
-          t.push(nf, iconBtn('upload', '上传文件', () => pickUpload()), h('span', { class: 'dv-tsep hide-narrow' }));
+          t.push(nf, iconBtn('upload', tx('上传文件', 'Upload files'), () => pickUpload()), h('span', { class: 'dv-tsep hide-narrow' }));
         }
-        t.push(iconBtn('download', files.length > 1 ? `下载 ${files.length} 个文件` : '下载', () => downloadSel(), { disabled: !files.length, cls: 'hide-narrow' }));
-        if (writable()) t.push(iconBtn('trash-2', '删除 (Delete)', () => trashItems(selIds()), { disabled: !n }));
+        t.push(iconBtn('download', files.length > 1 ? tx(`下载 ${files.length} 个文件`, `Download ${files.length} files`) : tx('下载', 'Download'), () => downloadSel(), { disabled: !files.length, cls: 'hide-narrow' }));
+        if (writable()) t.push(iconBtn('trash-2', tx('删除 (Delete)', 'Delete (Delete)'), () => trashItems(selIds()), { disabled: !n }));
       }
-      const rf = iconBtn('refresh-cw', '刷新 (F5)', () => load({ keepSel: true, force: true }), { cls: 'hide-narrow' });
+      const rf = iconBtn('refresh-cw', tx('刷新 (F5)', 'Refresh (F5)'), () => load({ keepSel: true, force: true }), { cls: 'hide-narrow' });
       rf.dataset.refresh = '';
-      t.push(h('span', { class: 'dv-tsep hide-narrow' }), viewSeg, rf, iconBtn('ellipsis', '更多', (e) => bgMenu(e.currentTarget)));
+      t.push(h('span', { class: 'dv-tsep hide-narrow' }), viewSeg, rf, iconBtn('ellipsis', tx('更多', 'More'), (e) => bgMenu(e.currentTarget)));
       clear(dynTools, t);
     }
 
@@ -249,8 +253,11 @@ export default {
       if (S.loading && !S.items.length) { foot.textContent = ''; return; }
       if (n) {
         const size = selItems().reduce((a, i) => a + (isFolder(i) ? 0 : i.size || 0), 0);
-        foot.textContent = `已选择 ${n} 项，共 ${total} 项${size ? `（${fmt.bytes(size)}）` : ''}`;
-      } else foot.textContent = S.query ? `找到 ${total} 项` : `${total} 项`;
+        foot.textContent = tx(
+          `已选择 ${n} 项，共 ${total} 项${size ? `（${fmt.bytes(size)}）` : ''}`,
+          `${n} of ${countText(total, '项', 'item')} selected${size ? ` (${fmt.bytes(size)})` : ''}`,
+        );
+      } else foot.textContent = S.query ? tx(`找到 ${total} 项`, `${countText(total, '项', 'item')} found`) : countText(total, '项', 'item');
     }
 
     // ---- content
@@ -260,13 +267,14 @@ export default {
       const { key, dir } = S.sort;
       const val = (i) => (key === 'size' ? (isFolder(i) ? i.item_count ?? -1 : i.size ?? -1)
         : key === 'modified' ? (toDate(i.modified)?.getTime() ?? 0) : key === 'kind' ? kindOf(i) : 0);
-      const byName = (a, b) => a.name.localeCompare(b.name, 'zh', { numeric: true, sensitivity: 'base' });
+      const loc = lang.isEn ? 'en' : 'zh';
+      const byName = (a, b) => a.name.localeCompare(b.name, loc, { numeric: true, sensitivity: 'base' });
       return [...arr].sort((a, b) => {
         const f = isFolder(b) - isFolder(a);
         if (f) return f;
         if (key === 'name') return byName(a, b) * dir;
         const x = val(a); const y = val(b);
-        const c = typeof x === 'string' ? x.localeCompare(y, 'zh') : x - y;
+        const c = typeof x === 'string' ? x.localeCompare(y, loc) : x - y;
         return c * dir || byName(a, b);
       });
     }
@@ -279,12 +287,12 @@ export default {
       body.dataset.view = S.view;
       if (S.loading && !S.items.length) { clear(body, h('div', { class: 'dv-center' }, spinner())); renderFoot(); return; }
       if (S.error) {
-        clear(body, h('div', { class: 'dv-center' }, errorBox(S.error), btn('重试', { kind: 'tinted', icon: 'refresh-cw', onclick: () => load() })));
+        clear(body, h('div', { class: 'dv-center' }, errorBox(S.error), btn(tx('重试', 'Retry'), { kind: 'tinted', icon: 'refresh-cw', onclick: () => load() })));
         renderFoot(); return;
       }
       const banner = S.loc === 'trash' && S.items.length
-        ? h('div', { class: 'dv-banner' }, icon('info'), h('span', {}, '“最近删除”中的项目会在 30 天后永久删除。'),
-          btn('清空', { kind: 'plain', size: 'sm', onclick: () => emptyTrash() }))
+        ? h('div', { class: 'dv-banner' }, icon('info'), h('span', {}, tx('“最近删除”中的项目会在 30 天后永久删除。', 'Items in Recently Deleted are permanently deleted after 30 days.')),
+          btn(tx('清空', 'Delete All'), { kind: 'plain', size: 'sm', onclick: () => emptyTrash() }))
         : null;
       if (!S.list.length) { clear(body, banner, emptyState()); renderFoot(); return; }
       clear(body, banner, S.view === 'grid' ? gridView() : listView());
@@ -292,12 +300,12 @@ export default {
     }
 
     function emptyState() {
-      if (S.query) return empty({ icon: 'search', title: '无结果', text: `当前文件夹中没有名称包含“${S.query}”的项目。` });
-      if (S.loc === 'trash') return empty({ icon: 'trash-2', title: '“最近删除”为空', text: '删除的文件会在这里保留 30 天，之后被永久删除。' });
-      if (S.loc === 'apps' && S.path.length === 1) return empty({ icon: 'layout-grid', title: '没有 App 文件夹', text: '使用 iCloud 存储文稿的 App 会显示在这里。' });
+      if (S.query) return empty({ icon: 'search', title: tx('无结果', 'No Results'), text: tx(`当前文件夹中没有名称包含“${S.query}”的项目。`, `No items containing “${S.query}” in this folder.`) });
+      if (S.loc === 'trash') return empty({ icon: 'trash-2', title: tx('“最近删除”为空', 'Recently Deleted Is Empty'), text: tx('删除的文件会在这里保留 30 天，之后被永久删除。', 'Deleted files stay here for 30 days before being permanently removed.') });
+      if (S.loc === 'apps' && S.path.length === 1) return empty({ icon: 'layout-grid', title: tx('没有 App 文件夹', 'No App Libraries'), text: tx('使用 iCloud 存储文稿的 App 会显示在这里。', 'Apps that store documents in iCloud appear here.') });
       return empty({
-        app: 'drive', title: '此文件夹为空', text: '将文件拖放到这里，或点击“上传”。',
-        action: writable() ? btn('上传文件', { kind: 'tinted', icon: 'upload', onclick: () => pickUpload() }) : null,
+        app: 'drive', title: tx('此文件夹为空', 'Folder Is Empty'), text: tx('将文件拖放到这里，或点击“上传”。', 'Drag files here, or click Upload.'),
+        action: writable() ? { label: tx('上传文件', 'Upload Files'), icon: 'upload', onClick: () => pickUpload() } : null,
       });
     }
 
@@ -317,8 +325,8 @@ export default {
     function listView() {
       const trash = S.loc === 'trash';
       const cols = trash
-        ? [['name', '名称'], ['restore', '原位置'], ['size', '大小'], ['modified', '修改日期']]
-        : [['name', '名称'], ['modified', '修改日期'], ['size', '大小'], ['kind', '种类']];
+        ? [['name', tx('名称', 'Name')], ['restore', tx('原位置', 'Original Location')], ['size', tx('大小', 'Size')], ['modified', tx('修改日期', 'Date Modified')]]
+        : [['name', tx('名称', 'Name')], ['modified', tx('修改日期', 'Date Modified')], ['size', tx('大小', 'Size')], ['kind', tx('种类', 'Kind')]];
       const headRow = h('div', { class: `dv-lhead ${trash ? 'trash' : ''}` }, cols.map(([k, l]) => h('button', {
         class: `dv-c c-${k} ${S.sort.key === k ? 'on' : ''}`, type: 'button', disabled: k === 'restore',
         onclick: () => setSort(k),
@@ -393,7 +401,7 @@ export default {
     let dropEl = null;
     const setDropEl = (n) => { if (dropEl !== n) { dropEl?.classList.remove('drop-into'); dropEl = n; n?.classList.add('drop-into'); } };
     const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
-    const showDrop = (name) => { dropText.textContent = `松开以上传到“${name}”`; dropOv.hidden = false; };
+    const showDrop = (name) => { dropText.textContent = tx(`松开以上传到“${name}”`, `Drop to upload to “${name}”`); dropOv.hidden = false; };
     const hideDrop = () => { dropOv.hidden = true; };
 
     body.addEventListener('dragstart', (e) => {
@@ -406,7 +414,7 @@ export default {
       e.dataTransfer.setData(DRAG_MIME, JSON.stringify(dragIds));
       e.dataTransfer.setData('text/plain', selItems().map((i) => i.name).join('\n'));
       if (dragIds.length > 1) {
-        const ghost = h('div', { class: 'dv-ghost' }, icon('layers'), `${dragIds.length} 项`);
+        const ghost = h('div', { class: 'dv-ghost' }, icon('layers'), countText(dragIds.length, '项', 'item'));
         document.body.append(ghost);
         e.dataTransfer.setDragImage(ghost, 18, 18);
         setTimeout(() => ghost.remove());
@@ -446,7 +454,7 @@ export default {
       const entries = [...(e.dataTransfer.items || [])].map((i) => i.webkitGetAsEntry?.());
       const dirs = entries.filter((x) => x?.isDirectory).length;
       const files = [...e.dataTransfer.files].filter((f, i) => !entries[i]?.isDirectory);
-      if (dirs) toast(`暂不支持上传文件夹，已跳过 ${dirs} 个文件夹`, 'info');
+      if (dirs) toast(tx(`暂不支持上传文件夹，已跳过 ${dirs} 个文件夹`, `Folder upload is not supported; skipped ${dirs} folder(s)`), 'info');
       const it = tile && itemById(tile.dataset.id);
       if (it) startUpload(files, { id: it.id, name: it.name });
       else if (writable()) startUpload(files, cwd());
@@ -536,7 +544,7 @@ export default {
     function downloadSel() {
       const files = selItems().filter((i) => !isFolder(i));
       files.forEach((f, i) => setTimeout(() => downloadItem(f), i * 400));
-      if (files.length > 1) toast(`正在下载 ${files.length} 个文件`, 'info');
+      if (files.length > 1) toast(tx(`正在下载 ${files.length} 个文件`, `Downloading ${files.length} files`), 'info');
     }
     function pickUpload() {
       if (!writable()) return;
@@ -549,11 +557,11 @@ export default {
       const total = files.reduce((a, f) => a + f.size, 0);
       const fill = h('div', { style: { width: '0%' } });
       const ic = h('span', { class: 'dv-up-ic' }, icon('cloud-upload'));
-      const status = h('div', { class: 'dv-up-status' }, `等待上传 · ${fmt.bytes(total)}`);
+      const status = h('div', { class: 'dv-up-status' }, tx(`等待上传 · ${fmt.bytes(total)}`, `Waiting to upload · ${fmt.bytes(total)}`));
       const mainCol = h('div', { class: 'dv-up-main' },
-        h('div', { class: 'dv-up-name' }, files.length === 1 ? files[0].name : `${files.length} 个文件`),
+        h('div', { class: 'dv-up-name' }, files.length === 1 ? files[0].name : countText(files.length, '个文件', 'file')),
         status, h('div', { class: 'progress' }, fill));
-      const row = h('div', { class: 'dv-up' }, ic, mainCol, iconBtn('x', '隐藏', () => row.remove(), { size: 'sm', cls: 'dv-up-x' }));
+      const row = h('div', { class: 'dv-up' }, ic, mainCol, iconBtn('x', tx('隐藏', 'Hide'), () => row.remove(), { size: 'sm', cls: 'dv-up-x' }));
       uploads.append(row);
       const form = new FormData();
       form.append('folder', dest.id);
@@ -561,13 +569,13 @@ export default {
       sendForm('/api/drive/upload', form, {
         onProgress: (p) => {
           fill.style.width = `${Math.round(p * 100)}%`;
-          if (p < 1) status.textContent = `正在上传到“${dest.name}”… ${Math.round(p * 100)}%`;
-          else { status.textContent = '正在存入 iCloud…'; row.classList.add('processing'); }
+          if (p < 1) status.textContent = tx(`正在上传到“${dest.name}”… ${Math.round(p * 100)}%`, `Uploading to “${dest.name}”… ${Math.round(p * 100)}%`);
+          else { status.textContent = tx('正在存入 iCloud…', 'Saving to iCloud…'); row.classList.add('processing'); }
         },
       }).then(() => {
         row.classList.remove('processing'); row.classList.add('done');
         clear(ic, icon('circle-check')); fill.style.width = '100%';
-        status.textContent = `已上传到“${dest.name}”`;
+        status.textContent = tx(`已上传到“${dest.name}”`, `Uploaded to “${dest.name}”`);
         setTimeout(() => row.remove(), 4000);
         if (!alive) return;
         if (cwd().id === dest.id) load({ keepSel: true, names: files.map((f) => f.name) });
@@ -575,16 +583,17 @@ export default {
       }).catch((e) => {
         row.classList.remove('processing'); row.classList.add('error');
         clear(ic, icon('circle-alert'));
-        status.textContent = e.message || '上传失败';
-        mainCol.append(h('button', { class: 'dv-up-retry', type: 'button', onclick: () => { row.remove(); startUpload(files, dest); } }, '重试'));
+        status.textContent = e.message || tx('上传失败', 'Upload failed');
+        mainCol.append(h('button', { class: 'dv-up-retry', type: 'button', onclick: () => { row.remove(); startUpload(files, dest); } }, tx('重试', 'Retry')));
       });
     }
 
     async function newFolder() {
       if (!writable()) return;
       const names = new Set(S.items.map((i) => i.name));
-      let name = '未命名文件夹'; let k = 2;
-      while (names.has(name)) name = `未命名文件夹 ${k++}`;
+      const base = tx('未命名文件夹', 'untitled folder');
+      let name = base; let k = 2;
+      while (names.has(name)) name = `${base} ${k++}`;
       const at = cwd().id;
       try { await post('/api/drive/mkdir', { id: at, name }); } catch (e) { toastError(e); return; }
       if (!alive || cwd().id !== at) return;
@@ -598,15 +607,15 @@ export default {
       if (!it || !writable()) return;
       const node = body.querySelector(`.dv-item[data-id="${CSS.escape(it.id)}"] .dv-name`);
       if (!node) return;
-      const input = h('input', { class: 'dv-rename', value: it.name, spellcheck: false, 'aria-label': '名称' });
+      const input = h('input', { class: 'dv-rename', value: it.name, spellcheck: false, 'aria-label': tx('名称', 'Name') });
       let done = false;
       const finish = async (commit) => {
         if (done) return;
         done = true;
         const v = input.value.trim();
         if (!commit || !v || v === it.name) { render(); return; }
-        if (/[/:]/.test(v)) { toast('名称不能包含“/”或“:”', 'error'); render(); return; }
-        if (S.items.some((i) => i !== it && i.name === v)) { toast(`名称“${v}”已被使用，请换一个名称。`, 'error'); render(); return; }
+        if (/[/:]/.test(v)) { toast(tx('名称不能包含“/”或“:”', 'Name cannot contain “/” or “:”'), 'error'); render(); return; }
+        if (S.items.some((i) => i !== it && i.name === v)) { toast(tx(`名称“${v}”已被使用，请换一个名称。`, `The name “${v}” is already taken.`), 'error'); render(); return; }
         const old = it.name;
         it.name = v; render(); scrollToItem(it.id);
         try { await post('/api/drive/rename', { id: it.id, name: v }); load({ keepSel: true }); } catch (e) { it.name = old; render(); toastError(e); }
@@ -632,37 +641,42 @@ export default {
       const before = S.items;
       S.items = S.items.filter((i) => !ids.includes(i.id)); S.sel = new Set(); render();
       try { await post('/api/drive/trash', { ids }); } catch (e) { S.items = before; render(); toastError(e); return; }
-      toast(ids.length === 1 ? `已将“${first}”移到“最近删除”` : `已将 ${ids.length} 项移到“最近删除”`, 'success',
-        { ms: 6000, action: { label: '撤销', onClick: () => undoTrash(ids) } });
+      toast(ids.length === 1 ? tx(`已将“${first}”移到“最近删除”`, `Moved “${first}” to Recently Deleted`) : tx(`已将 ${ids.length} 项移到“最近删除”`, `Moved ${ids.length} items to Recently Deleted`), 'success',
+        { ms: 6000, action: { label: tx('撤销', 'Undo'), onClick: () => undoTrash(ids) } });
       load({ keepSel: true });
     }
     async function undoTrash(ids) {
       try {
         await get('/api/drive/trash'); // refresh etags of the trashed nodes
         await post('/api/drive/recover', { ids });
-        toast('已撤销删除', 'success');
+        toast(tx('已撤销删除', 'Restored from Recently Deleted'), 'success');
       } catch (e) { toastError(e); }
       if (alive) load({ keepSel: true });
     }
     async function recover(ids) {
       if (!ids.length) return;
-      try { await post('/api/drive/recover', { ids }); toast(ids.length === 1 ? '已恢复' : `已恢复 ${ids.length} 项`, 'success'); } catch (e) { toastError(e); }
+      try { await post('/api/drive/recover', { ids }); toast(ids.length === 1 ? tx('已恢复', 'Recovered') : tx(`已恢复 ${ids.length} 项`, `Recovered ${ids.length} items`), 'success'); } catch (e) { toastError(e); }
       load();
     }
     async function deleteForever(ids) {
       if (!ids.length) return;
-      const name = ids.length === 1 ? `“${itemById(ids[0])?.name}”` : `这 ${ids.length} 项`;
-      const ok = await confirmDialog(`永久删除${name}？`, { title: '永久删除', okLabel: '永久删除', danger: true, icon: 'trash-2', detail: '此操作无法撤销。' });
+      const ok = await confirmDialog(
+        ids.length === 1 ? tx(`永久删除“${itemById(ids[0])?.name}”？`, `Permanently delete “${itemById(ids[0])?.name}”?`) : tx(`永久删除这 ${ids.length} 项？`, `Permanently delete ${ids.length} items?`),
+        { title: tx('永久删除', 'Delete Immediately'), okLabel: tx('永久删除', 'Delete'), danger: true, icon: 'trash-2', detail: tx('此操作无法撤销。', 'This action cannot be undone.') },
+      );
       if (!ok) return;
-      try { await post('/api/drive/delete-forever', { ids }); toast('已永久删除', 'success'); } catch (e) { toastError(e); }
+      try { await post('/api/drive/delete-forever', { ids }); toast(tx('已永久删除', 'Permanently deleted'), 'success'); } catch (e) { toastError(e); }
       load();
     }
     async function emptyTrash() {
       const ids = S.items.map((i) => i.id);
       if (!ids.length) return;
-      const ok = await confirmDialog(`永久删除“最近删除”中的全部 ${ids.length} 项？`, { title: '清空“最近删除”', okLabel: '清空', danger: true, icon: 'trash-2', detail: '此操作无法撤销。' });
+      const ok = await confirmDialog(
+        tx(`永久删除“最近删除”中的全部 ${ids.length} 项？`, `Permanently delete all ${ids.length} items in Recently Deleted?`),
+        { title: tx('清空“最近删除”', 'Empty Recently Deleted'), okLabel: tx('清空', 'Delete All'), danger: true, icon: 'trash-2', detail: tx('此操作无法撤销。', 'This action cannot be undone.') },
+      );
       if (!ok) return;
-      try { await post('/api/drive/delete-forever', { ids }); toast('已清空“最近删除”', 'success'); } catch (e) { toastError(e); }
+      try { await post('/api/drive/delete-forever', { ids }); toast(tx('已清空“最近删除”', 'Recently Deleted emptied'), 'success'); } catch (e) { toastError(e); }
       load();
     }
 
@@ -673,7 +687,7 @@ export default {
       S.items = S.items.filter((i) => !ids.includes(i.id)); S.sel = new Set(); render();
       try {
         await post('/api/drive/move', { ids, dest: dest.id });
-        toast(ids.length === 1 ? `已移到“${dest.name}”` : `已将 ${ids.length} 项移到“${dest.name}”`, 'success');
+        toast(ids.length === 1 ? tx(`已移到“${dest.name}”`, `Moved to “${dest.name}”`) : tx(`已将 ${ids.length} 项移到“${dest.name}”`, `Moved ${ids.length} items to “${dest.name}”`), 'success');
       } catch (e) { S.items = before; render(); toastError(e); }
       if (alive) load({ keepSel: true });
     }
@@ -696,25 +710,26 @@ export default {
           const data = await get('/api/drive/list', { id: here.id });
           if (nav[nav.length - 1] !== here) return;
           const fs = data.items.filter((i) => i.type === 'folder' && !ids.includes(i.id))
-            .sort((a, b) => a.name.localeCompare(b.name, 'zh', { numeric: true }));
+            .sort((a, b) => a.name.localeCompare(b.name, lang.isEn ? 'en' : 'zh', { numeric: true }));
           clear(box, fs.length
             ? fs.map((f) => h('button', { class: 'dv-pick-row', type: 'button', onclick: () => { nav.push({ id: f.id, name: f.name }); draw(); } },
               fileIcon(f), h('span', { class: 'dv-pick-name' }, f.name), icon('chevron-right', { cls: 'dv-pick-go' })))
-            : h('div', { class: 'dv-pick-empty' }, '没有子文件夹'));
+            : h('div', { class: 'dv-pick-empty' }, tx('没有子文件夹', 'No subfolders')));
         } catch (e) { clear(box, errorBox(e)); }
       };
       const one = ids.length === 1 ? itemById(ids[0]) : null;
       m = modal({
-        title: one ? `移动“${one.name}”` : `移动 ${ids.length} 项`, subtitle: '选择目标文件夹', width: '480px',
+        title: one ? tx(`移动“${one.name}”`, `Move “${one.name}”`) : tx(`移动 ${ids.length} 项`, `Move ${ids.length} Items`),
+        subtitle: tx('选择目标文件夹', 'Choose destination folder'), width: '480px',
         body: h('div', { class: 'dv-pick' }, crumbEl, box),
         actions: [
-          { label: '新建文件夹', left: true, kind: 'ghost', icon: 'folder-plus', onClick: async () => {
-            const name = await promptDialog('新建文件夹', '未命名文件夹', { okLabel: '创建' });
+          { label: tx('新建文件夹', 'New Folder'), left: true, kind: 'ghost', icon: 'folder-plus', onClick: async () => {
+            const name = await promptDialog(tx('新建文件夹', 'New Folder'), tx('未命名文件夹', 'untitled folder'), { okLabel: tx('创建', 'Create') });
             if (name) { await post('/api/drive/mkdir', { id: nav[nav.length - 1].id, name }); draw(); }
             return false;
           } },
-          { label: '取消' },
-          { label: '移到这里', primary: true, onClick: () => moveItems(ids, nav[nav.length - 1]) },
+          { label: tx('取消', 'Cancel') },
+          { label: tx('移到这里', 'Move Here'), primary: true, onClick: () => moveItems(ids, nav[nav.length - 1]) },
         ],
       });
       draw();
@@ -723,19 +738,19 @@ export default {
     function info(it) {
       const where = S.loc === 'trash' ? (it.restore_path || '—') : S.path.map((p) => p.name).join(' › ');
       const rows = [
-        ['种类', kindOf(it)],
-        ['大小', isFolder(it) ? sizeText(it) : `${fmt.bytes(it.size)}${it.size >= 1024 ? `（${Number(it.size).toLocaleString()} 字节）` : ''}`],
-        [S.loc === 'trash' ? '原位置' : '位置', where],
-        ['创建时间', it.created ? fmt.datetime(it.created) : '—'],
-        ['修改时间', it.modified ? fmt.datetime(it.modified) : '—'],
-        it.shared ? ['共享', '已与他人共享'] : null,
+        [tx('种类', 'Kind'), kindOf(it)],
+        [tx('大小', 'Size'), isFolder(it) ? sizeText(it) : `${fmt.bytes(it.size)}${it.size >= 1024 ? tx(`（${Number(it.size).toLocaleString()} 字节）`, ` (${Number(it.size).toLocaleString()} bytes)`) : ''}`],
+        [S.loc === 'trash' ? tx('原位置', 'Original') : tx('位置', 'Where'), where],
+        [tx('创建时间', 'Created'), it.created ? fmt.datetime(it.created) : '—'],
+        [tx('修改时间', 'Modified'), it.modified ? fmt.datetime(it.modified) : '—'],
+        it.shared ? [tx('共享', 'Shared'), tx('已与他人共享', 'Shared with others')] : null,
       ].filter(Boolean);
       modal({
-        title: '简介', width: '420px',
+        title: tx('简介', 'Get Info'), width: '420px',
         body: h('div', { class: 'dv-info' },
           h('div', { class: 'dv-info-top' }, fileIcon(it, { thumb: true }), h('div', { class: 'dv-info-name' }, it.name)),
           h('dl', { class: 'dv-info-list' }, rows.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]))),
-        actions: [{ label: '完成', primary: true }],
+        actions: [{ label: tx('完成', 'Done'), primary: true }],
       });
     }
 
@@ -745,8 +760,8 @@ export default {
       const stage = h('div', { class: 'dv-ql-stage' });
       const title = h('div', { class: 'dv-ql-title' });
       const sub = h('div', { class: 'dv-ql-sub' });
-      const prev = iconBtn('chevron-left', '上一个 (←)', () => step(-1));
-      const next = iconBtn('chevron-right', '下一个 (→)', () => step(1));
+      const prev = iconBtn('chevron-left', tx('上一个 (←)', 'Previous (←)'), () => step(-1));
+      const next = iconBtn('chevron-right', tx('下一个 (→)', 'Next (→)'), () => step(1));
       const onKey = (e) => {
         if (document.querySelectorAll('.overlay').length > 1) return;
         if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
@@ -758,9 +773,9 @@ export default {
         onClose: () => document.removeEventListener('keydown', onKey, true),
         body: h('div', { class: 'dv-ql' },
           h('div', { class: 'dv-ql-bar' }, h('div', { class: 'dv-ql-head' }, title, sub), prev, next,
-            iconBtn('download', '下载', () => downloadItem(files[idx])),
-            iconBtn('info', '简介', () => info(files[idx])),
-            iconBtn('x', '关闭 (Esc)', () => m.close())),
+            iconBtn('download', tx('下载', 'Download'), () => downloadItem(files[idx])),
+            iconBtn('info', tx('简介', 'Get Info'), () => info(files[idx])),
+            iconBtn('x', tx('关闭 (Esc)', 'Close (Esc)'), () => m.close())),
           stage),
       });
       document.addEventListener('keydown', onKey, true);
@@ -784,15 +799,15 @@ export default {
           clear(stage, h('div', { class: 'dv-center' }, spinner()));
           try {
             const r = await fetch(u, { credentials: 'same-origin' });
-            if (!r.ok) throw new Error(`加载失败（${r.status}）`);
+            if (!r.ok) throw new Error(tx(`加载失败（${r.status}）`, `Failed to load (${r.status})`));
             const text = await r.text();
             if (files[idx] === it) clear(stage, h('pre', { class: 'dv-ql-text' }, text));
           } catch (e) { if (files[idx] === it) clear(stage, h('div', { class: 'dv-center' }, errorBox(e))); }
         } else {
           clear(stage, h('div', { class: 'dv-ql-none' }, fileIcon(it),
             h('div', { class: 'dv-ql-none-name' }, it.name),
-            h('div', { class: 'dv-ql-none-sub' }, `${kindOf(it)} · ${fmt.bytes(it.size)} · 不支持预览`),
-            btn('下载', { kind: 'primary', icon: 'download', onclick: () => downloadItem(it) })));
+            h('div', { class: 'dv-ql-none-sub' }, `${kindOf(it)} · ${fmt.bytes(it.size)} · ${tx('不支持预览', 'Preview unavailable')}`),
+            btn(tx('下载', 'Download'), { kind: 'primary', icon: 'download', onclick: () => downloadItem(it) })));
         }
       }
       show();
@@ -805,45 +820,45 @@ export default {
       const n = items.length;
       if (S.loc === 'trash') {
         menu(e, tidy([
-          { label: n > 1 ? `恢复 ${n} 项` : '恢复', icon: 'archive-restore', onClick: () => recover(selIds()) },
-          one ? { label: '简介', icon: 'info', onClick: () => info(one) } : null,
+          { label: n > 1 ? tx(`恢复 ${n} 项`, `Recover ${n} Items`) : tx('恢复', 'Recover'), icon: 'archive-restore', onClick: () => recover(selIds()) },
+          one ? { label: tx('简介', 'Get Info'), icon: 'info', onClick: () => info(one) } : null,
           '-',
-          { label: n > 1 ? `永久删除 ${n} 项…` : '永久删除…', icon: 'trash-2', danger: true, onClick: () => deleteForever(selIds()) },
+          { label: n > 1 ? tx(`永久删除 ${n} 项…`, `Delete ${n} Items Immediately…`) : tx('永久删除…', 'Delete Immediately…'), icon: 'trash-2', danger: true, onClick: () => deleteForever(selIds()) },
         ]));
         return;
       }
       const w = writable();
       menu(e, tidy([
-        one ? { label: '打开', icon: isFolder(one) ? 'folder-open' : 'external-link', shortcut: 'Enter', onClick: () => open(one) } : null,
-        one && previewKind(one) ? { label: '快速查看', icon: 'eye', shortcut: '空格', onClick: () => quickLook(one) } : null,
-        files.length ? { label: files.length > 1 ? `下载 ${files.length} 个文件` : '下载', icon: 'download', onClick: () => downloadSel() } : null,
+        one ? { label: tx('打开', 'Open'), icon: isFolder(one) ? 'folder-open' : 'external-link', shortcut: 'Enter', onClick: () => open(one) } : null,
+        one && previewKind(one) ? { label: tx('快速查看', 'Quick Look'), icon: 'eye', shortcut: tx('空格', 'Space'), onClick: () => quickLook(one) } : null,
+        files.length ? { label: files.length > 1 ? tx(`下载 ${files.length} 个文件`, `Download ${files.length} Files`) : tx('下载', 'Download'), icon: 'download', onClick: () => downloadSel() } : null,
         '-',
-        one && w ? { label: '重命名', icon: 'pencil', shortcut: 'F2', onClick: () => rename(one) } : null,
-        w ? { label: n > 1 ? `移动 ${n} 项到…` : '移动到…', icon: 'folder-input', onClick: () => moveDialog(selIds()) } : null,
-        one ? { label: '简介', icon: 'info', onClick: () => info(one) } : null,
-        one ? { label: '拷贝名称', icon: 'copy', onClick: () => copyText(one.name, '已拷贝名称') } : null,
+        one && w ? { label: tx('重命名', 'Rename'), icon: 'pencil', shortcut: 'F2', onClick: () => rename(one) } : null,
+        w ? { label: n > 1 ? tx(`移动 ${n} 项到…`, `Move ${n} Items to…`) : tx('移动到…', 'Move to…'), icon: 'folder-input', onClick: () => moveDialog(selIds()) } : null,
+        one ? { label: tx('简介', 'Get Info'), icon: 'info', onClick: () => info(one) } : null,
+        one ? { label: tx('拷贝名称', 'Copy Name'), icon: 'copy', onClick: () => copyText(one.name, tx('已拷贝名称', 'Name copied')) } : null,
         '-',
-        w ? { label: n > 1 ? `删除 ${n} 项` : '删除', icon: 'trash-2', danger: true, shortcut: 'Delete', onClick: () => trashItems(selIds()) } : null,
+        w ? { label: n > 1 ? tx(`删除 ${n} 项`, `Delete ${n} Items`) : tx('删除', 'Delete'), icon: 'trash-2', danger: true, shortcut: 'Delete', onClick: () => trashItems(selIds()) } : null,
       ]));
     }
 
     function bgMenu(at) {
       const sortItem = (k, l) => ({ label: l, checked: S.sort.key === k, onClick: () => setSort(k, S.sort.key === k ? S.sort.dir : (k === 'modified' || k === 'size' ? -1 : 1)) });
       menu(at, tidy([
-        writable() ? { label: '新建文件夹', icon: 'folder-plus', shortcut: 'Ctrl+N', onClick: () => newFolder() } : null,
-        writable() ? { label: '上传文件…', icon: 'upload', onClick: () => pickUpload() } : null,
-        S.loc === 'trash' && S.items.length ? { label: '清空“最近删除”…', icon: 'trash-2', danger: true, onClick: () => emptyTrash() } : null,
-        S.list.length ? { label: '全选', icon: 'check-check', shortcut: 'Ctrl+A', onClick: () => selectAll() } : null,
-        '-', { section: '显示方式' },
-        { label: '图标', checked: S.view === 'grid', onClick: () => setView('grid') },
-        { label: '列表', checked: S.view === 'list', onClick: () => setView('list') },
-        '-', { section: '排序方式' },
-        sortItem('name', '名称'), sortItem('kind', '种类'), sortItem('modified', '修改日期'), sortItem('size', '大小'),
+        writable() ? { label: tx('新建文件夹', 'New Folder'), icon: 'folder-plus', shortcut: 'Ctrl+N', onClick: () => newFolder() } : null,
+        writable() ? { label: tx('上传文件…', 'Upload Files…'), icon: 'upload', onClick: () => pickUpload() } : null,
+        S.loc === 'trash' && S.items.length ? { label: tx('清空“最近删除”…', 'Empty Recently Deleted…'), icon: 'trash-2', danger: true, onClick: () => emptyTrash() } : null,
+        S.list.length ? { label: tx('全选', 'Select All'), icon: 'check-check', shortcut: 'Ctrl+A', onClick: () => selectAll() } : null,
+        '-', { section: tx('显示方式', 'View') },
+        { label: tx('图标', 'Icons'), checked: S.view === 'grid', onClick: () => setView('grid') },
+        { label: tx('列表', 'List'), checked: S.view === 'list', onClick: () => setView('list') },
+        '-', { section: tx('排序方式', 'Sort By') },
+        sortItem('name', tx('名称', 'Name')), sortItem('kind', tx('种类', 'Kind')), sortItem('modified', tx('修改日期', 'Date Modified')), sortItem('size', tx('大小', 'Size')),
         '-',
-        { label: '升序', checked: S.sort.dir > 0, onClick: () => setSort(S.sort.key, 1) },
-        { label: '降序', checked: S.sort.dir < 0, onClick: () => setSort(S.sort.key, -1) },
+        { label: tx('升序', 'Ascending'), checked: S.sort.dir > 0, onClick: () => setSort(S.sort.key, 1) },
+        { label: tx('降序', 'Descending'), checked: S.sort.dir < 0, onClick: () => setSort(S.sort.key, -1) },
         '-',
-        { label: '刷新', icon: 'refresh-cw', shortcut: 'F5', onClick: () => load({ keepSel: true, force: true }) },
+        { label: tx('刷新', 'Refresh'), icon: 'refresh-cw', shortcut: 'F5', onClick: () => load({ keepSel: true, force: true }) },
       ]));
     }
 

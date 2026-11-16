@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from pyicloud.services.calendar import CalendarObject, EventObject
 from tzlocal import get_localzone_name
 
+from ..i18n import tr
 from .common import parse_dt, run
 
 router = APIRouter(prefix="/api/calendar", tags=["calendar"])
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/api/calendar", tags=["calendar"])
 
 class EventBody(BaseModel):
     pguid: str
-    title: str = "新建日程"
+    title: str = ""
     start: str
     end: str
     all_day: bool = False
@@ -92,7 +93,7 @@ def _resolve_range(body: EventBody) -> tuple[datetime, datetime]:
     start = parse_dt(body.start)
     end = parse_dt(body.end)
     if start is None or end is None:
-        raise HTTPException(400, "缺少开始或结束时间")
+        raise HTTPException(400, tr("缺少开始或结束时间", "Missing start or end time"))
     start = start.replace(tzinfo=None)
     end = end.replace(tzinfo=None)
     if body.all_day:
@@ -101,7 +102,7 @@ def _resolve_range(body: EventBody) -> tuple[datetime, datetime]:
         # UI sends the inclusive last day; Apple wants the exclusive next day.
         end = end + timedelta(days=1)
     if end <= start:
-        raise HTTPException(400, "结束时间必须晚于开始时间")
+        raise HTTPException(400, tr("结束时间必须晚于开始时间", "End time must be after start time"))
     return start, end
 
 
@@ -151,7 +152,7 @@ def event_detail(pguid: str, guid: str):
     raw = run(lambda api: _detail_raw(api.calendar, pguid, guid))
     events_ = raw.get("Event") or []
     if not events_:
-        raise HTTPException(404, "日程不存在")
+        raise HTTPException(404, tr("日程不存在", "Event not found"))
     out = normalize_event(events_[0])
     out["invitees"] = raw.get("Invitee") or []
     out["alarm_records"] = raw.get("Alarm") or []
@@ -163,7 +164,7 @@ def create_event(body: EventBody):
     start, end = _resolve_range(body)
     ev = EventObject(
         body.pguid,
-        title=body.title,
+        title=body.title or tr("新建日程", "New Event"),
         start_date=start,
         end_date=end,
         all_day=body.all_day,
@@ -203,11 +204,11 @@ def update_event(pguid: str, guid: str, body: EventBody):
         raw = _detail_raw(cal, pguid, guid)
         events_ = raw.get("Event") or []
         if not events_:
-            raise HTTPException(404, "日程不存在")
+            raise HTTPException(404, tr("日程不存在", "Event not found"))
         ev = copy.deepcopy(events_[0])
         tz = ev.get("tz") or get_localzone_name()
         ev.update({
-            "title": body.title,
+            "title": body.title or tr("新建日程", "New Event"),
             "location": body.location,
             "description": body.description,
             "allDay": body.all_day,

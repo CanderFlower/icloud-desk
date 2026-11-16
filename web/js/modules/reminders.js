@@ -1,19 +1,21 @@
-// Reminders — smart lists (今天/计划/全部/旗标/已完成) + user lists, inline editing.
+// Reminders — smart lists (Today/Scheduled/All/Flagged/Completed) + user lists, inline editing.
 import { cachedGet, peekCache, post, patch, del, enc } from '../api.js';
+import { tx } from '../i18n.js';
 import {
   h, clear, icon, iconBtn, btn, toolbar, segmented, searchBox, switchEl, field, menu, popover,
   toast, toastError, confirmDialog, empty, skeleton, errorBox, fmt, toDate, store, isTyping,
 } from '../ui.js';
 
-const SMART = [
-  { id: 'today', title: '今天', icon: 'calendar-days', color: '#007aff' },
-  { id: 'scheduled', title: '计划', icon: 'calendar', color: '#ff3b30' },
-  { id: 'all', title: '全部', icon: 'inbox', color: '#5b5b60' },
-  { id: 'flagged', title: '旗标', icon: 'flag', color: '#ff9500' },
-  { id: 'completed', title: '已完成', icon: 'check', color: '#8e8e93' },
+const smartLists = () => [
+  { id: 'today', title: tx('今天', 'Today'), icon: 'calendar-days', color: '#007aff' },
+  { id: 'scheduled', title: tx('计划', 'Scheduled'), icon: 'calendar', color: '#ff3b30' },
+  { id: 'all', title: tx('全部', 'All'), icon: 'inbox', color: '#5b5b60' },
+  { id: 'flagged', title: tx('旗标', 'Flagged'), icon: 'flag', color: '#ff9500' },
+  { id: 'completed', title: tx('已完成', 'Completed'), icon: 'check', color: '#8e8e93' },
 ];
-const PRIORITY = [
-  { value: 0, label: '无' }, { value: 9, label: '低' }, { value: 5, label: '中' }, { value: 1, label: '高' },
+const priorities = () => [
+  { value: 0, label: tx('无', 'None') }, { value: 9, label: tx('低', 'Low') },
+  { value: 5, label: tx('中', 'Medium') }, { value: 1, label: tx('高', 'High') },
 ];
 const bangs = (p) => (p === 1 ? '!!!' : p === 5 ? '!!' : p === 9 ? '!' : '');
 
@@ -34,9 +36,10 @@ function isOverdue(r) {
 
 export default {
   id: 'reminders',
-  title: '提醒事项',
+  get title() { return tx('提醒事项', 'Reminders'); },
   app: 'reminders',
   mount(el) {
+    const SMART = smartLists();
     const S = {
       lists: (peekCache('/api/reminders/lists') || []).filter((l) => !l.is_group),
       open: new Map(), // listId -> reminders (incomplete)
@@ -55,15 +58,15 @@ export default {
     const tb = toolbar({
       title: '',
       right: [
-        iconBtn('list', '切换列表', (e) => switchMenu(e.currentTarget), { cls: 'when-side-hidden' }),
+        iconBtn('list', tx('切换列表', 'Switch list'), (e) => switchMenu(e.currentTarget), { cls: 'when-side-hidden' }),
         h('span', { ref: (x) => { tb_done = x; } }),
-        iconBtn('refresh-cw', '刷新 (F5)', () => reload({ quiet: true, force: true }), { cls: 'refresh' }),
-        h('button', { class: 'btn primary sm', type: 'button', dataset: { new: '' }, onclick: () => focusNewRow() }, icon('plus'), '新提醒事项'),
+        iconBtn('refresh-cw', tx('刷新 (F5)', 'Refresh (F5)'), () => reload({ quiet: true, force: true }), { cls: 'refresh' }),
+        h('button', { class: 'btn primary sm', type: 'button', dataset: { new: '' }, onclick: () => focusNewRow() }, icon('plus'), tx('新提醒事项', 'New Reminder')),
       ],
     });
     tb.querySelector('.refresh').dataset.refresh = '';
 
-    const search = searchBox({ placeholder: '搜索提醒事项', oninput: (q) => { S.query = q.toLowerCase(); renderMain(); } });
+    const search = searchBox({ placeholder: tx('搜索提醒事项', 'Search reminders'), oninput: (q) => { S.query = q.toLowerCase(); renderMain(); } });
 
     el.append(h('div', { class: 'panes collapse-side' },
       h('div', { class: 'pane side rem-side' }, h('div', { class: 'rem-side-search' }, search), sideBody),
@@ -139,7 +142,7 @@ export default {
         h('span', { class: 'smart-title' }, s.title));
       }));
       const lists = h('div', { class: 'side-list' },
-        h('div', { class: 'side-title' }, '我的列表'),
+        h('div', { class: 'side-title' }, tx('我的列表', 'My Lists')),
         S.lists.length ? S.lists.map((l) => {
           const c = listColor(l.color);
           return h('div', {
@@ -151,7 +154,7 @@ export default {
           h('span', { class: 'list-badge', style: { '--c': c } }, icon('list', { size: 12 })),
           h('span', { class: 'label' }, l.title),
           h('span', { class: 'count' }, (S.open.get(l.id) || []).length || ''));
-        }) : h('div', { class: 'small faint', style: { padding: '6px 8px' } }, '没有列表'));
+        }) : h('div', { class: 'small faint', style: { padding: '6px 8px' } }, tx('没有列表', 'No lists')));
       clear(sideBody, tiles, lists);
     }
 
@@ -176,10 +179,10 @@ export default {
       const smart = !isList ? SMART.find((s) => s.id === S.sel.id) : null;
       const color = list ? listColor(list.color) : smart?.color || '#007aff';
       const title = list?.title || smart?.title || '';
-      tb.setTitle(S.query ? `搜索：${S.query}` : '');
+      tb.setTitle(S.query ? tx(`搜索：${S.query}`, `Search: ${S.query}`) : '');
 
       // show-completed toggle only makes sense for real lists
-      clear(tb_done, isList ? btn(S.showDone ? '隐藏已完成' : '显示已完成', {
+      clear(tb_done, isList ? btn(S.showDone ? tx('隐藏已完成', 'Hide Completed') : tx('显示已完成', 'Show Completed'), {
         kind: 'ghost', size: 'sm', icon: S.showDone ? 'eye-off' : 'eye',
         onclick: async () => { S.showDone = !S.showDone; store.set('rem.showDone', S.showDone); if (S.showDone) await loadDone(); renderMain(); },
       }) : null);
@@ -191,7 +194,7 @@ export default {
 
       const count = rows.filter((r) => !r.completed).length;
       const head = h('div', { class: 'rem-head', style: { '--c': color } },
-        h('h1', {}, S.query ? '搜索结果' : title),
+        h('h1', {}, S.query ? tx('搜索结果', 'Search Results') : title),
         h('span', { class: 'rem-head-count' }, S.sel.id === 'completed' && !S.query ? rows.length : count));
 
       const body = h('div', { class: 'rem-list' });
@@ -203,10 +206,10 @@ export default {
           let key; let label; let c;
           if (S.sel.id === 'scheduled' && !S.query) {
             const d = toDate(r.due_date); key = fmt.isoDate(d);
-            label = isOverdue(r) ? '已过期' : `${fmt.relDay(d)} · ${fmt.weekday(d)}`;
+            label = isOverdue(r) ? tx('已过期', 'Overdue') : `${fmt.relDay(d)} · ${fmt.weekday(d)}`;
             if (isOverdue(r)) key = '0-overdue';
           } else {
-            const l = listById(r.list_id); key = r.list_id; label = l?.title || '列表'; c = listColor(l?.color);
+            const l = listById(r.list_id); key = r.list_id; label = l?.title || tx('列表', 'List'); c = listColor(l?.color);
           }
           if (!groups.has(key)) groups.set(key, { label, c, rows: [] });
           groups.get(key).rows.push(r);
@@ -227,14 +230,14 @@ export default {
 
       const canAdd = !S.query && S.sel.id !== 'completed' && S.lists.length;
       clear(listBody, head, body, canAdd ? newRow(color) : null);
-      if (!rows.length && !canAdd) listBody.append(empty({ icon: 'check-check', title: S.query ? '没有匹配的提醒事项' : '没有已完成的提醒事项' }));
-      else if (!rows.length) listBody.append(h('div', { class: 'rem-empty' }, S.sel.id === 'today' ? '今天没有待办，享受一下吧 ☀' : '没有提醒事项'));
+      if (!rows.length && !canAdd) listBody.append(empty({ icon: 'check-check', title: S.query ? tx('没有匹配的提醒事项', 'No matching reminders') : tx('没有已完成的提醒事项', 'No completed reminders') }));
+      else if (!rows.length) listBody.append(h('div', { class: 'rem-empty' }, S.sel.id === 'today' ? tx('今天没有待办，享受一下吧 ☀', 'Nothing due today — enjoy your day ☀') : tx('没有提醒事项', 'No Reminders')));
     }
 
     function row(r, { sub, showList } = {}) {
       const list = listById(r.list_id);
       const color = listColor(list?.color);
-      const titleInput = h('input', { class: 'rem-title', value: r.title, spellcheck: false, 'aria-label': '标题' });
+      const titleInput = h('input', { class: 'rem-title', value: r.title, spellcheck: false, 'aria-label': tx('标题', 'Title') });
       titleInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); titleInput.blur(); }
         if (e.key === 'Escape') { titleInput.value = r.title; titleInput.blur(); }
@@ -251,7 +254,7 @@ export default {
         showList || (S.sel.type === 'smart' && S.sel.id === 'scheduled') ? h('span', { class: 'rem-list-name', style: { '--c': color } }, list?.title) : null,
       ].filter(Boolean);
       const check = h('input', {
-        type: 'checkbox', class: 'round-check', checked: !!r.completed, style: { '--c': color }, 'aria-label': '完成',
+        type: 'checkbox', class: 'round-check', checked: !!r.completed, style: { '--c': color }, 'aria-label': tx('完成', 'Complete'),
         onchange: () => toggleDone(r, check.checked, rowEl),
       });
       const rowEl = h('div', {
@@ -269,16 +272,16 @@ export default {
         r.desc ? h('div', { class: 'rem-notes' }, r.desc) : null,
         meta.length ? h('div', { class: 'rem-meta' }, meta) : null),
       h('div', { class: 'rem-actions' },
-        iconBtn('flag', r.flagged ? '取消旗标' : '添加旗标', () => save(r, { flagged: !r.flagged }), { size: 'sm', cls: r.flagged ? 'on flag' : '' }),
-        iconBtn('info', '详细信息', (e) => details(e.currentTarget, r), { size: 'sm' })));
+        iconBtn('flag', r.flagged ? tx('取消旗标', 'Unflag') : tx('添加旗标', 'Flag'), () => save(r, { flagged: !r.flagged }), { size: 'sm', cls: r.flagged ? 'on flag' : '' }),
+        iconBtn('info', tx('详细信息', 'Details'), (e) => details(e.currentTarget, r), { size: 'sm' })));
       return rowEl;
     }
 
     function newRow(color) {
-      const input = h('input', { class: 'rem-title', placeholder: '新提醒事项', spellcheck: false });
+      const input = h('input', { class: 'rem-title', placeholder: tx('新提醒事项', 'New Reminder'), spellcheck: false });
       const add = async () => {
         const title = input.value.trim(); if (!title) return;
-        const listId = S.sel.type === 'list' ? S.sel.id : (S.lists.find((l) => l.title === '提醒') || S.lists[0]).id;
+        const listId = S.sel.type === 'list' ? S.sel.id : (S.lists.find((l) => l.title === '提醒' || /^reminders$/i.test(l.title)) || S.lists[0]).id;
         const body = { list_id: listId, title };
         if (S.sel.id === 'today') body.due_date = fmt.isoDate(new Date());
         if (S.sel.id === 'flagged') body.flagged = true;
@@ -343,39 +346,39 @@ export default {
       patch(`/api/reminders/item/${enc(r.id)}`, { completed: value }).then((u) => Object.assign(r, u)).catch((e) => {
         r.completed = !value; replace(r); renderSide(); renderMain(); toastError(e);
       });
-      if (value) toast(`已完成“${r.title}”`, 'success', { ms: 3500, action: { label: '撤销', onClick: () => save(r, { completed: false }) } });
+      if (value) toast(tx(`已完成“${r.title}”`, `Completed “${r.title}”`), 'success', { ms: 3500, action: { label: tx('撤销', 'Undo'), onClick: () => save(r, { completed: false }) } });
     }
 
     async function remove(r) {
-      if (!await confirmDialog(`删除“${r.title}”？`, { title: '删除提醒事项', okLabel: '删除', danger: true, icon: 'trash-2' })) return;
+      if (!await confirmDialog(tx(`删除“${r.title}”？`, `Delete “${r.title}”?`), { title: tx('删除提醒事项', 'Delete Reminder'), okLabel: tx('删除', 'Delete'), danger: true, icon: 'trash-2' })) return;
       try {
         await del(`/api/reminders/item/${enc(r.id)}`);
         r.deleted = true; replace(r); renderSide(); renderMain();
-        toast('已删除', 'success');
+        toast(tx('已删除', 'Deleted'), 'success');
       } catch (e) { toastError(e); }
     }
 
     let dragId = null;
     function moveTo(id, listId) {
       const r = [...allOpen(), ...allDone()].find((x) => x.id === id);
-      if (r && r.list_id !== listId) save(r, { list_id: listId }).then(() => toast(`已移到“${listById(listId)?.title}”`, 'success'));
+      if (r && r.list_id !== listId) save(r, { list_id: listId }).then(() => toast(tx(`已移到“${listById(listId)?.title}”`, `Moved to “${listById(listId)?.title}”`), 'success'));
     }
 
     function contextMenu(e, r) {
       menu(e, [
-        { label: r.completed ? '标记为未完成' : '标记为已完成', icon: 'circle-check', onClick: () => save(r, { completed: !r.completed }) },
-        { label: r.flagged ? '取消旗标' : '添加旗标', icon: 'flag', onClick: () => save(r, { flagged: !r.flagged }) },
-        { label: '详细信息…', icon: 'info', onClick: () => details(listBody.querySelector(`[data-id="${CSS.escape(r.id)}"] .rem-actions`) || e, r) },
+        { label: r.completed ? tx('标记为未完成', 'Mark as Incomplete') : tx('标记为已完成', 'Mark as Completed'), icon: 'circle-check', onClick: () => save(r, { completed: !r.completed }) },
+        { label: r.flagged ? tx('取消旗标', 'Unflag') : tx('添加旗标', 'Flag'), icon: 'flag', onClick: () => save(r, { flagged: !r.flagged }) },
+        { label: tx('详细信息…', 'Details…'), icon: 'info', onClick: () => details(listBody.querySelector(`[data-id="${CSS.escape(r.id)}"] .rem-actions`) || e, r) },
         '-',
-        { section: '截止日期' },
-        { label: '今天', icon: 'calendar-days', onClick: () => save(r, { due_date: fmt.isoDate(new Date()), all_day: true }) },
-        { label: '明天', icon: 'calendar-plus', onClick: () => { const d = new Date(); d.setDate(d.getDate() + 1); save(r, { due_date: fmt.isoDate(d), all_day: true }); } },
-        { label: '移除日期', icon: 'calendar', disabled: !r.due_date, onClick: () => save(r, { clear_due_date: true }) },
+        { section: tx('截止日期', 'Due Date') },
+        { label: tx('今天', 'Today'), icon: 'calendar-days', onClick: () => save(r, { due_date: fmt.isoDate(new Date()), all_day: true }) },
+        { label: tx('明天', 'Tomorrow'), icon: 'calendar-plus', onClick: () => { const d = new Date(); d.setDate(d.getDate() + 1); save(r, { due_date: fmt.isoDate(d), all_day: true }); } },
+        { label: tx('移除日期', 'Remove Date'), icon: 'calendar', disabled: !r.due_date, onClick: () => save(r, { clear_due_date: true }) },
         '-',
-        { section: '移到' },
+        { section: tx('移到', 'Move to') },
         ...S.lists.filter((l) => l.id !== r.list_id).map((l) => ({ label: l.title, dot: listColor(l.color), onClick: () => moveTo(r.id, l.id) })),
         '-',
-        { label: '删除', icon: 'trash-2', danger: true, onClick: () => remove(r) },
+        { label: tx('删除', 'Delete'), icon: 'trash-2', danger: true, onClick: () => remove(r) },
       ]);
     }
 
@@ -383,27 +386,27 @@ export default {
       const due = toDate(r.due_date);
       const dateOnly = !due || r.all_day || /^\d{4}-\d{2}-\d{2}$/.test(r.due_date);
       const title = h('input', { class: 'input', value: r.title });
-      const notes = h('textarea', { class: 'textarea', placeholder: '备注', rows: 3 }, r.desc || '');
+      const notes = h('textarea', { class: 'textarea', placeholder: tx('备注', 'Notes'), rows: 3 }, r.desc || '');
       const date = h('input', { class: 'input', type: 'date', value: due ? fmt.isoDate(due) : fmt.isoDate(new Date()) });
       const time = h('input', { class: 'input', type: 'time', value: due && !dateOnly ? fmt.time(due) : '09:00' });
       const dateSw = switchEl(!!due, (v) => { dateRow.classList.toggle('off', !v); if (!v) timeSw.input.checked = false; timeRow.classList.toggle('off', !timeSw.input.checked); });
       const timeSw = switchEl(!!due && !dateOnly, (v) => { if (v) dateSw.input.checked = true; dateRow.classList.toggle('off', !dateSw.input.checked); timeRow.classList.toggle('off', !v); });
-      const dateRow = h('div', { class: `group-row ${due ? '' : 'off'}` }, h('span', { class: 'gi red' }, icon('calendar', { size: 14 })), h('span', { class: 'label' }, '日期'), date, dateSw);
-      const timeRow = h('div', { class: `group-row ${due && !dateOnly ? '' : 'off'}` }, h('span', { class: 'gi blue' }, icon('clock', { size: 14 })), h('span', { class: 'label' }, '时间'), time, timeSw);
+      const dateRow = h('div', { class: `group-row ${due ? '' : 'off'}` }, h('span', { class: 'gi red' }, icon('calendar', { size: 14 })), h('span', { class: 'label' }, tx('日期', 'Date')), date, dateSw);
+      const timeRow = h('div', { class: `group-row ${due && !dateOnly ? '' : 'off'}` }, h('span', { class: 'gi blue' }, icon('clock', { size: 14 })), h('span', { class: 'label' }, tx('时间', 'Time')), time, timeSw);
       const flag = switchEl(r.flagged);
-      const prio = segmented(PRIORITY, r.priority || 0, null);
+      const prio = segmented(priorities(), r.priority || 0, null);
       const listSel = h('select', { class: 'select' }, S.lists.map((l) => h('option', { value: l.id, selected: l.id === r.list_id }, l.title)));
 
       const p = popover(anchor, h('div', { class: 'rem-detail' },
         h('div', { class: 'rem-detail-head' }, title, notes),
         h('div', { class: 'group' }, dateRow, timeRow),
         h('div', { class: 'group' },
-          h('div', { class: 'group-row' }, h('span', { class: 'gi orange' }, icon('flag', { size: 14 })), h('span', { class: 'label' }, '旗标'), flag),
-          h('div', { class: 'group-row' }, h('span', { class: 'gi gray' }, icon('triangle-alert', { size: 14 })), h('span', { class: 'label' }, '优先级'), prio),
-          h('div', { class: 'group-row' }, h('span', { class: 'gi indigo' }, icon('list', { size: 14 })), h('span', { class: 'label' }, '列表'), listSel)),
+          h('div', { class: 'group-row' }, h('span', { class: 'gi orange' }, icon('flag', { size: 14 })), h('span', { class: 'label' }, tx('旗标', 'Flag')), flag),
+          h('div', { class: 'group-row' }, h('span', { class: 'gi gray' }, icon('triangle-alert', { size: 14 })), h('span', { class: 'label' }, tx('优先级', 'Priority')), prio),
+          h('div', { class: 'group-row' }, h('span', { class: 'gi indigo' }, icon('list', { size: 14 })), h('span', { class: 'label' }, tx('列表', 'List')), listSel)),
         h('div', { class: 'row between', style: { marginTop: '12px' } },
-          btn('删除', { kind: 'danger-ghost', icon: 'trash-2', size: 'sm', onclick: () => { p.close(); remove(r); } }),
-          btn('完成', { kind: 'primary', size: 'sm', onclick: apply }))), { align: 'end', width: '340px', cls: 'rem-pop' });
+          btn(tx('删除', 'Delete'), { kind: 'danger-ghost', icon: 'trash-2', size: 'sm', onclick: () => { p.close(); remove(r); } }),
+          btn(tx('完成', 'Done'), { kind: 'primary', size: 'sm', onclick: apply }))), { align: 'end', width: '340px', cls: 'rem-pop' });
       setTimeout(() => title.focus(), 30);
       p.el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) apply(); });
 

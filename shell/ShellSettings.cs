@@ -14,6 +14,9 @@ internal sealed class ShellSettings
     /// <summary>The "still running in the tray" hint has been shown once.</summary>
     public bool TrayHintShown { get; set; }
 
+    /// <summary>Preferred UI language ("system", "zh-CN", or "en").</summary>
+    public string? Language { get; set; }
+
     public static ShellSettings Load()
     {
         try

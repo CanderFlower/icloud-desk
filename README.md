@@ -1,149 +1,162 @@
 # iCloud Desk
 
-iCloud Desk 是 Windows 上的 iCloud 桌面客户端，界面仿照 iCloud 网页版。它支持日历、提醒事项、备忘录（可写）、iCloud 云盘、照片、通讯录、查找、隐藏邮件地址和账户。
+**English | [简体中文](README.zh-CN.md)**
 
-- 只需登录一次（Apple ID 密码加双重认证），之后会长期保持会话。
-- 安装包会把它注册为正式的 Windows 程序，带开始菜单入口和“应用和功能”里的卸载项。
-- 附带 `icd` 命令行工具，所有功能都能用 JSON 读写，方便其他 AI Agent 调用。
+iCloud Desk is an unofficial native Windows desktop client for iCloud, styled after iCloud.com, paired with an AI-Agent-friendly JSON CLI (`icd`). It supports **Calendar**, **Reminders**, **Notes (read & write)**, **iCloud Drive**, **Photos**, **Contacts**, **Find My**, **Hide My Email**, and **Account**.
 
-## 安装
+- **Sign in once**: Authenticate with your Apple Account password + Two-Factor Authentication; your trusted session persists locally.
+- **Native Windows integration**: Per-user installer with Start Menu shortcut, `App Paths` registration, `Apps & Features` uninstaller, system tray residency, and global hotkey.
+- **Multilingual (`English` & `简体中文`)**: Follows your system language automatically and switches live in the UI without reloading.
+- **Agent-ready `icd` CLI**: Every module can be read and modified via structured JSON on stdout, sharing the desktop app’s background daemon and session.
 
-1. 从 [GitHub Releases](https://github.com/CanderFlower/icloud-desk/releases) 下载 `iCloudDesk-Setup-<版本>.exe`（或自行构建 `dist\iCloudDesk-Setup-<版本>.exe`）并运行。按当前用户安装，不需要管理员权限。
-   - 安装位置：`%LOCALAPPDATA%\Programs\iCloud Desk`。
-   - 会添加开始菜单快捷方式、卸载项，以及 App Paths 注册（`Win+R` 里输入 `iCloudDesk` 或 `icd` 都能启动）。
-   - 默认勾选“把 `icd` 加入 PATH”。需要新开一个终端才会生效。
-2. 打开 iCloud Desk，登录并完成双重认证。
-3. 静默安装命令：`iCloudDesk-Setup-x.y.z.exe /VERYSILENT /TASKS=addtopath`
+## Installation
 
-需要 Edge WebView2 运行时，Windows 10 和 11 一般已经自带。
+1. Download `iCloudDesk-Setup-<version>.exe` from [GitHub Releases](https://github.com/CanderFlower/icloud-desk/releases) (or build `dist\iCloudDesk-Setup-<version>.exe` locally) and run it. Installs per-user — no administrator privileges required.
+   - Install directory: `%LOCALAPPDATA%\Programs\iCloud Desk`.
+   - Registers Start Menu shortcuts, an uninstaller entry, and Windows `App Paths` (launch via `Win+R` → `iCloudDesk` or `icd`).
+   - Installer wizard supports English and Simplified Chinese; **Add `icd` to PATH** is checked by default (open a new terminal to use `icd`).
+2. Launch **iCloud Desk**, sign in with your Apple Account, and complete Two-Factor Authentication.
+3. Silent install: `iCloudDesk-Setup-x.y.z.exe /VERYSILENT /TASKS=addtopath`
 
-### 窗口与托盘
+Requires the Microsoft Edge WebView2 Runtime (preinstalled on Windows 10 and Windows 11).
 
-- 点关闭（或 Alt+F4）默认隐藏到系统托盘，不退出。右键托盘图标可以“退出”，或取消勾选“关闭窗口时隐藏到托盘”。
-- 全局快捷键 `Ctrl+Alt+R` 用来显示或隐藏窗口。如果这个快捷键已经被别的程序占用，托盘菜单里会显示“（被占用）”。
-- 再次启动程序（开始菜单或 `iCloudDesk`）会把已隐藏的窗口唤出来。
+### Window & System Tray
 
-### 本地缓存
+- Closing the window (`✕` or `Alt+F4`) hides it to the system tray by default instead of quitting. Right-click the tray icon to **Quit** or toggle **Hide to tray when closing**.
+- Global shortcut `Ctrl+Alt+R` shows or hides the window from anywhere (displays `(in use)` in the tray menu if another app already claimed the hotkey).
+- Launching `iCloudDesk` again brings the existing hidden window to the foreground.
 
-日历、提醒事项、备忘录列表和云盘目录会保留本地快照，切换页面、重新打开窗口时先显示缓存，不必每次等 Apple 返回数据。缓存超过一分钟会在后台同步；刷新按钮或 `F5` 始终读取最新数据，同步失败会提示并保留已有内容。
+### Multilingual Support (`English` / `简体中文`)
 
-缓存按 Apple 账户及中国大陆/国际区隔离，最多保留七天，写入后失效，退出登录会清除。缓存只用于查看，不会离线排队提交修改；备忘录正文仍从服务读取后才能编辑。首次访问未缓存的内容仍需联网加载。桌面窗口启动时也会直接复用已经运行的本地服务，避免重复启动命令行组件。
+- **Auto-detection & live switching**: Defaults to `System` (Simplified Chinese on `zh*` locales, English otherwise).
+- **UI switcher**: Click the globe icon on the top-right of the sign-in screen, or open the bottom-left account menu → **Language** (`System`, `简体中文`, `English`) to switch live without reloading.
+- **Full-stack sync**: Switching languages updates the web UI, date/weekday formatting, native Windows tray menu, error views, and localized backend messages simultaneously.
+- **CLI language**: `icd` detects the OS language automatically, or accepts `--lang {auto,zh,en}` and `ICD_LANG=en`.
 
-## 命令行（给 Agent 用）
+### Local Snapshot Cache
+
+Calendar, Reminders, Notes lists, and Drive folders keep account-scoped local snapshots so switching modules or reopening the window renders immediately while revalidating in the background (stale after 60 seconds, retained up to 7 days). Manual refresh (`F5` or toolbar button) always fetches live data; offline sync errors preserve cached views with a toast notice.
+
+Snapshots are isolated by Apple Account and region (`icloud.com` vs `icloud.com.cn`), invalidated automatically on writes, and wiped on sign-out. Note bodies are still fetched live before editing. On startup, the desktop shell also reuses an already-running local daemon directly.
+
+## CLI (for Scripts & AI Agents)
 
 ```powershell
-icd guide                       # 完整用法，把这段输出交给 Agent 就够了
+icd guide                       # Complete self-contained reference — hand this output to any AI Agent
 icd calendar events --days 7
-icd calendar add --title "开会" --start "tomorrow" --duration 60 --calendar 个人
-icd reminders add --title "交报告" --due +2d --priority high
-icd notes add --folder 备忘录 --text "标题`n- [ ] 待办一`n正文"
+icd calendar add --title "Team Sync" --start "tomorrow" --duration 60 --calendar Work
+icd reminders add --title "Submit report" --due +2d --priority high
+icd notes add --folder Notes --text "Title`n- [ ] First item`nBody text"
 icd notes get <ID> --format markdown
 icd drive upload .\a.pdf --to /Documents
-icd api GET /api/account        # 直接调用任意 HTTP 接口
+icd api GET /api/account        # Raw access to any local REST endpoint
 ```
 
-- **输出格式**：结果以 JSON 写到 stdout，错误以 `{"error": ...}` 写到 stderr。
-- **退出码**：
+- **Output format**: Structured JSON on `stdout`; errors emit `{"error": ...}` on `stderr`.
+- **Exit codes**:
 
-  | 退出码 | 含义 |
+  | Code | Meaning |
   |---|---|
-  | 0 | 成功 |
-  | 1 | 错误 |
-  | 2 | 参数错误 |
-  | 3 | 未登录 |
-  | 4 | 未找到 |
-  | 5 | 冲突或已锁定 |
+  | 0 | Success |
+  | 1 | Runtime / API error |
+  | 2 | Invalid CLI usage |
+  | 3 | Not signed in |
+  | 4 | Resource not found |
+  | 5 | Conflict or locked |
 
-- **常用选项**：`--compact` 输出单行 JSON；`--ascii` 把非 ASCII 字符转义；`--demo` 使用假数据。
-- **后台服务**：CLI 会自动启动后台服务 `icd daemon`，它和桌面窗口共用同一个登录会话。
-- **中文乱码**：如果管道里的中文显示成乱码，设置 `$env:ICD_UTF8=1`，或者使用 `--ascii`。
+- **Global flags**: `--compact` (single-line JSON), `--ascii` (escape non-ASCII as `\uXXXX`), `--demo` (in-memory demo data), `--lang {auto,zh,en}`.
+- **Shared daemon**: `icd` automatically starts `icd daemon` on demand and shares the same login session as the desktop app.
+- **UTF-8 piping on Windows**: Set `$env:ICD_UTF8=1` or pass `--ascii` if your shell pipe mangles non-ASCII characters.
 
-## 功能
+## Features
 
-| 模块 | 能力 |
+| Module | Capabilities |
 |---|---|
-| 日历 | 读写：月、周、日视图，新建、编辑、删除日程，日历管理 |
-| 提醒事项 | 读写：列表、智能列表、新建、完成、截止时间、优先级、旗标、子任务 |
-| 备忘录 | 读写：文件夹、富文本编辑（标题、列表、清单、粗体斜体）、自动保存、最近删除与恢复；锁定的备忘录只能查看 |
-| iCloud 云盘 | 读写：Finder 风格的网格和列表视图，上传、新建、重命名、移动、废纸篓、快速查看 |
-| 照片 | 读写：相簿、大图、收藏、上传、删除、下载原图 |
-| 通讯录 | 只读 |
-| 查找 | 设备、电量、地图、播放声音、发送信息、丢失模式 |
-| 隐藏邮件地址 | 新建、编辑、停用、删除 |
-| 账户 | 用户信息、存储空间、设备 |
+| Calendar | Read/Write: Month, Week, Day, and List views; drag to create/move/resize; create/edit/delete events & calendars |
+| Reminders | Read/Write: User lists & smart lists (Today, Scheduled, All, Flagged, Completed), inline editing, due dates, priority, flags, subtasks |
+| Notes | Read/Write: Folder tree, block rich-text editor (headings, lists, checklists, bold/italic/underline/strikethrough, code blocks, links), auto-save, Recently Deleted & recovery; locked notes are read-only |
+| iCloud Drive | Read/Write: Finder-style icon & list views, drag-and-drop upload, mkdir, rename, move, Recently Deleted, Quick Look (`Space`) |
+| Photos | Read/Write: Library & albums, justified day-grouped grid, lightbox viewer, favorites, upload, delete, original download |
+| Contacts | Read-only: Pinyin & Latin alphabetical index, upcoming birthday badges, vCard (`.vcf`) export |
+| Find My | Devices, battery status, OpenStreetMap location view, Play Sound, Send Message, Lost Mode |
+| Hide My Email | Generate random aliases, create, edit label/note, deactivate/reactivate, delete |
+| Account | Profile, iCloud storage breakdown, signed-in Apple devices, Family Sharing |
 
-备忘录写入功能是自己实现的：它使用 iCloud 网页版同款的 CloudKit 和 CRDT/protobuf 格式，代码在 `app/notes_*.py`。保存时会检查版本，如果在别的设备上改过，会提示冲突。
+Writable Notes support (`app/notes_*.py`) speaks the same CloudKit `records/modify` API and CRDT/protobuf (`TTMergeableString`) format as iCloud.com Notes, including optimistic concurrency checks via `recordChangeTag`.
 
-## 登录说明
+## Authentication Notes
 
-- **App 专用密码不能登录 iCloud 网页服务。** 它只能用于 CalDAV、CardDAV 和 IMAP，所以这里必须用 Apple ID 主密码加双重认证码登录。
-- 会话保存在 `%APPDATA%\icloud-desk`，可以用环境变量 `ICLOUD_DESK_HOME` 改位置。
-- 勾选“记住密码”后，密码会存进 Windows 凭据管理器。会话过期时程序会自动重新登录，只有 Apple 要求重新做双重认证时才需要你操作。
-- 中国大陆账户请勾选“中国大陆 iCloud”（会使用 icloud.com.cn）。
+- **App-specific passwords do not work.** Apple restricts app-specific passwords to CalDAV, CardDAV, and IMAP; iCloud web services (Notes, Drive, Photos, Find My, Hide My Email) require your primary Apple Account password + 2FA.
+- Session cookies and trust tokens are stored in `%APPDATA%\icloud-desk` (override with `ICLOUD_DESK_HOME`).
+- When **Keep me signed in** is checked, your password is saved in **Windows Credential Manager** so expired web sessions renew silently without repeating 2FA.
+- For China mainland accounts operated by GCBD, check **China mainland iCloud account (`icloud.com.cn`)**.
 
-## 架构
+## Architecture
 
 ```
-iCloudDesk.exe  (shell/)       C# .NET 8 + WebView2 外壳，负责窗口、托盘和单实例
-      │ 启动或复用
+iCloudDesk.exe  (shell/)       C# .NET 8 + WebView2 native shell: custom caption bar, tray, hotkey, single-instance
+      │ spawns or reuses
       ▼
 icd.exe daemon  (app/, PyInstaller)
-      每个用户一个本地 HTTP 服务（127.0.0.1，用 token 鉴权）
-      FastAPI、pyicloud，并负责托管 web/ 前端
+      Per-user loopback HTTP service (127.0.0.1, Bearer/HttpOnly-cookie token auth)
+      FastAPI + pyicloud, serves web/ static ES modules and localized /api/* JSON endpoints
       ▲
-icd.exe <command>  (app/cli.py)  命令行，通过同一个后台服务读写
+icd.exe <command>  (app/cli.py)  CLI client talking to the same background daemon
 ```
 
-| 路径 | 内容 |
+| Path | Description |
 |---|---|
-| `app/daemon.py` | 后台服务的启动、发现和停止（`%APPDATA%\icloud-desk\daemon.json`） |
-| `app/server.py`、`app/routes/*.py` | REST 接口 `/api/<模块>/...` |
-| `app/demo.py` | 演示模式用的内存假数据，接口结构和真实接口一致 |
-| `web/` | 无需构建的 ES Module 前端 |
-| `web/styles.css` | 设计系统 |
-| `web/css/<模块>.css` | 各模块样式 |
-| `web/js/ui.js` | 组件库：modal、menu、toast、icon 等 |
-| `web/js/modules/*.js` | 功能模块，格式为 `export default { id, title, app, mount(el) }` |
-| `web/assets/icons.svg` | Lucide 图标 sprite，用 `scripts/build_icons.py` 生成，图标名写在 `icons.txt` |
-| `web/assets/apps/` | iCloud 应用图标 |
+| `app/daemon.py` | Background daemon lifecycle & discovery (`%APPDATA%\icloud-desk\daemon.json`) |
+| `app/i18n.py` | Backend & CLI locale context (`zh-CN` / `en`) |
+| `app/server.py`, `app/routes/*.py` | FastAPI REST endpoints (`/api/<module>/...`) |
+| `app/demo.py` | In-memory demo mode (`--demo`) with localized sample data |
+| `web/` | Buildless native ES Module frontend |
+| `web/styles.css`, `web/css/<module>.css` | Design system & module stylesheets |
+| `web/js/i18n.js` | Frontend localization, live switcher, and pluralization helpers |
+| `web/js/cache.js` | Account-scoped snapshot cache with background revalidation |
+| `web/js/ui.js` | Shared UI components: modal, menu, popover, toast, icons, locale-aware date formatting |
+| `web/js/modules/*.js` | Feature modules (`export default { id, get title(), app, mount(el) }`) |
+| `web/assets/icons.svg` | Lucide icon sprite generated by `scripts/build_icons.py` from `web/assets/icons.txt` |
+| `web/assets/apps/` | iCloud application icons |
+| `shell/` | C# WinForms + WebView2 desktop shell (including `shell/I18n.cs`) |
 
-## 开发
+## Development
 
 ```bat
-run.bat                    :: 第一次运行会自动创建 .venv，然后在浏览器打开（真实账户）
-run.bat --demo ui          :: 演示数据，不需要登录，适合改 UI
-run.bat --demo daemon restart   :: 改了 Python 后端后需要重启服务
-.venv\Scripts\python -m pytest
-node --test tests\cache.test.mjs  :: 本地快照、后台更新、账户隔离和写入失效测试
+run.bat                         :: Creates .venv on first run and opens the UI in browser (real account)
+run.bat --demo ui               :: Launches with in-memory demo data (no Apple Account needed)
+run.bat --demo daemon restart   :: Restart the local Python daemon after backend edits
+.venv\Scripts\python -m pytest  :: Run Python tests (Notes CRDT/protobuf codec, Drive cache, i18n)
+node --test tests\*.test.mjs    :: Run frontend cache & i18n unit tests
 ```
 
-前端改完直接刷新页面就能看到效果。
+Frontend files need no bundler — edit under `web/` and refresh.
 
-### 打包
+### Packaging
 
-需要准备：
+Prerequisites:
 
-- Python 3.11 及以上
+- Python 3.11+
 - .NET 8 SDK
 - [Inno Setup 6](https://jrsoftware.org/isdl.php)
 - `pip install -r requirements-build.txt`
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build.ps1            # 完整构建，生成 dist\iCloudDesk-Setup-x.y.z.exe
-powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -SkipShell # 只重新打包 Python 部分
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1            # Full build -> dist\iCloudDesk-Setup-x.y.z.exe
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -SkipShell # Repackage Python core only
 ```
 
-版本号写在 `app/__init__.py` 里。
+The version number lives in `app/__init__.py`.
 
-## 已知限制
+## Known Limitations
 
-- 备忘录：含附件、表格或绘图的备忘录默认只读。可以强制保存（CLI 加 `--force`），但这些内容会丢失。
-- 通讯录目前只读。
-- 日历：重复日程和受邀日程只能查看。
-- 数据来自 [pyicloud](https://github.com/timlaing/pyicloud)。Apple 改接口时可能需要升级 pyicloud 并重新打包。
+- **Notes**: Notes containing attachments, tables, or drawings default to read-only. You can force-edit (`Edit Anyway` in UI or `--force` in CLI), which overwrites the body without attachments.
+- **Contacts**: Currently read-only.
+- **Calendar**: Repeating events and invitee events are currently view-only.
+- Powered by [pyicloud](https://github.com/timlaing/pyicloud); upstream changes to Apple’s private web APIs may require updating `pyicloud` and repackaging.
 
-## 开源协议与声明
+## License & Disclaimer
 
-- 本项目基于 [MIT License](LICENSE) 开源。
-- 本项目为非官方第三方客户端，与 Apple Inc. 无关；iCloud 及相关服务名称、应用图标归 Apple Inc. 所有，界面通用图标来自 [Lucide](https://lucide.dev/)。
+- Released under the [MIT License](LICENSE).
+- Unofficial third-party client, not affiliated with or endorsed by Apple Inc. “iCloud” and iCloud application icons are trademarks/copyrights of Apple Inc.; UI icons are from [Lucide](https://lucide.dev/) (ISC License).
 

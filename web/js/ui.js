@@ -4,6 +4,8 @@
 //   appIcon('notes')                                – real iCloud app icon (light/dark)
 //   menu(eventOrEl, items) / modal() / confirmDialog() / promptDialog() / toast()
 
+import { lang, tx, MONTHS_SHORT_EN, WEEKDAYS_ZH, WEEKDAYS_EN } from './i18n.js';
+
 // ------------------------------------------------------------------ DOM
 export function h(tag, attrs = {}, ...children) {
   const svg = tag === 'svg' || tag === 'use' || attrs?.__svg;
@@ -57,7 +59,7 @@ export function icon(name, { size, cls = '', title } = {}) {
   return s;
 }
 
-const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+const WEEKDAYS = WEEKDAYS_ZH;
 
 /** Real iCloud app icon (assets/apps/<id>.png + -dark.png). Calendar is drawn live. */
 export function appIcon(id, size = 24) {
@@ -68,8 +70,9 @@ export function appIcon(id, size = 24) {
 }
 
 export function calendarIcon(date = new Date(), size = 24) {
+  const wd = lang.isEn ? WEEKDAYS_EN[date.getDay()].toUpperCase() : WEEKDAYS_ZH[date.getDay()].slice(1);
   return h('span', { class: 'cal-icon', style: { width: `${size}px`, height: `${size}px`, '--s': `${size}px` } },
-    h('span', { class: 'wd' }, WEEKDAYS[date.getDay()].slice(1)),
+    h('span', { class: 'wd' }, wd),
     h('span', { class: 'd' }, date.getDate()));
 }
 
@@ -101,8 +104,8 @@ export function segmented(options, value, onChange, { cls = '' } = {}) {
 }
 
 /** Search box with icon + clear. oninput gets debounced value. */
-export function searchBox({ placeholder = '搜索', oninput, delay = 200, value = '' } = {}) {
-  const input = h('input', { class: 'input', type: 'search', placeholder, value, spellcheck: false });
+export function searchBox({ placeholder, oninput, delay = 200, value = '' } = {}) {
+  const input = h('input', { class: 'input', type: 'search', placeholder: placeholder ?? tx('搜索', 'Search'), value, spellcheck: false });
   const fire = debounce(() => oninput?.(input.value.trim()), delay);
   input.addEventListener('input', fire);
   input.addEventListener('keydown', (e) => { if (e.key === 'Escape' && input.value) { e.stopPropagation(); input.value = ''; fire(); } });
@@ -126,7 +129,7 @@ export function field(label, control, hint) {
 export function toolbar({ title, subtitle, left = [], right = [], cls = '' } = {}) {
   const t = h('div', { class: 'title' }, title ?? '');
   const el = h('div', { class: `toolbar ${cls}` },
-    h('button', { class: 'icon-btn menu-toggle', 'aria-label': '菜单', onclick: () => window.dispatchEvent(new Event('toggle-drawer')) }, icon('panel-left')),
+    h('button', { class: 'icon-btn menu-toggle', 'aria-label': tx('菜单', 'Menu'), onclick: () => window.dispatchEvent(new Event('toggle-drawer')) }, icon('panel-left')),
     left, t, subtitle ? h('div', { class: 'subtitle' }, subtitle) : null,
     h('div', { class: 'tools' }, right));
   el.setTitle = (s) => { t.textContent = s; };
@@ -168,8 +171,8 @@ export function toastError(err) {
   toast(err?.message || String(err), 'error', 5200);
 }
 
-export function spinner(text = '加载中…') {
-  return h('div', { class: 'loading' }, h('div', { class: 'spin' }), text);
+export function spinner(text) {
+  return h('div', { class: 'loading' }, h('div', { class: 'spin' }), text ?? tx('加载中…', 'Loading…'));
 }
 
 export function skeleton(rows = 6, { avatar = true } = {}) {
@@ -190,7 +193,7 @@ export function empty(opts, legacyIcon) {
 }
 
 export function errorBox(e) {
-  return h('div', { class: 'error-box' }, icon('circle-alert'), h('div', {}, h('div', { class: 'strong' }, '加载失败'), h('div', { class: 'small' }, e?.message || String(e))));
+  return h('div', { class: 'error-box' }, icon('circle-alert'), h('div', {}, h('div', { class: 'strong' }, tx('加载失败', 'Failed to load')), h('div', { class: 'small' }, e?.message || String(e))));
 }
 
 /** Run an async loader showing a spinner/skeleton then error in the target element. */
@@ -228,7 +231,7 @@ export function modal({ title, subtitle, body, actions = [], width, size = '', o
   const dialog = h('div', { class: `modal ${size} ${cls}`.trim(), role: 'dialog', 'aria-modal': 'true', style: width ? { width } : undefined },
     title || closeButton ? h('div', { class: 'modal-header' },
       h('h3', {}, title ?? '', subtitle ? h('div', { class: 'sub' }, subtitle) : null),
-      closeButton && !cls.includes('alert') ? iconBtn('x', '关闭 (Esc)', close, { size: 'sm' }) : null) : null,
+      closeButton && !cls.includes('alert') ? iconBtn('x', tx('关闭 (Esc)', 'Close (Esc)'), close, { size: 'sm' }) : null) : null,
     h('div', { class: 'modal-body' }, body),
     footer);
   for (const a of actions) {
@@ -258,17 +261,17 @@ export function modal({ title, subtitle, body, actions = [], width, size = '', o
 }
 
 /** Promise<boolean>. Alert-style confirmation. */
-export function confirmDialog(message, { title = '确认', okLabel = '确定', cancelLabel = '取消', danger = false, icon: ic, detail } = {}) {
+export function confirmDialog(message, { title, okLabel, cancelLabel, danger = false, icon: ic, detail } = {}) {
   return new Promise((resolve) => {
     let result = false;
     modal({
-      title,
+      title: title ?? tx('确认', 'Confirm'),
       cls: 'alert',
       body: h('div', {}, typeof message === 'string' ? h('p', {}, message) : message, detail ? h('p', { class: 'small faint' }, detail) : null),
       onClose: () => resolve(result),
       actions: [
-        { label: cancelLabel },
-        { label: okLabel, primary: !danger, danger, onClick: () => { result = true; } },
+        { label: cancelLabel ?? tx('取消', 'Cancel') },
+        { label: okLabel ?? tx('确定', 'OK'), primary: !danger, danger, onClick: () => { result = true; } },
       ],
     });
     if (ic || danger) {
@@ -280,7 +283,7 @@ export function confirmDialog(message, { title = '确认', okLabel = '确定', c
 }
 
 /** Promise<string|null>. */
-export function promptDialog(title, value = '', { placeholder = '', label, okLabel = '确定', hint } = {}) {
+export function promptDialog(title, value = '', { placeholder = '', label, okLabel, hint } = {}) {
   return new Promise((resolve) => {
     let result = null;
     const input = h('input', { class: 'input', value, placeholder, spellcheck: false });
@@ -288,7 +291,7 @@ export function promptDialog(title, value = '', { placeholder = '', label, okLab
       title, size: 'sm',
       body: label || hint ? field(label, input, hint) : input,
       onClose: () => resolve(result),
-      actions: [{ label: '取消' }, { label: okLabel, primary: true, onClick: () => { result = input.value.trim() || null; } }],
+      actions: [{ label: tx('取消', 'Cancel') }, { label: okLabel ?? tx('确定', 'OK'), primary: true, onClick: () => { result = input.value.trim() || null; } }],
     });
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { result = input.value.trim() || null; m.close(); } });
     setTimeout(() => input.select(), 40);
@@ -434,7 +437,7 @@ const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() ==
 
 export const fmt = {
   pad,
-  WEEKDAYS,
+  get WEEKDAYS() { return lang.isEn ? WEEKDAYS_EN : WEEKDAYS_ZH; },
   bytes(n) {
     if (n === null || n === undefined || n === '') return '—';
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -442,20 +445,32 @@ export const fmt = {
     while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
     return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
   },
-  date(d) { d = toDate(d); return d ? `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日` : ''; },
-  shortDate(d) { d = toDate(d); return d ? `${d.getMonth() + 1}月${d.getDate()}日` : ''; },
+  date(d) {
+    d = toDate(d);
+    if (!d) return '';
+    return lang.isEn
+      ? `${MONTHS_SHORT_EN[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
+      : `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+  },
+  shortDate(d) {
+    d = toDate(d);
+    if (!d) return '';
+    return lang.isEn
+      ? `${MONTHS_SHORT_EN[d.getMonth()]} ${d.getDate()}`
+      : `${d.getMonth() + 1}月${d.getDate()}日`;
+  },
   time(d) { d = toDate(d); return d ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : ''; },
   datetime(d) { d = toDate(d); return d ? `${fmt.date(d)} ${fmt.time(d)}` : ''; },
-  weekday(d) { d = toDate(d); return d ? WEEKDAYS[d.getDay()] : ''; },
+  weekday(d) { d = toDate(d); return d ? fmt.WEEKDAYS[d.getDay()] : ''; },
   /** 今天 14:30 / 昨天 / 周三 / 3月5日 / 2023年3月5日 */
   smart(d, { time = true } = {}) {
     d = toDate(d); if (!d) return '';
     const now = new Date();
     const y = new Date(now); y.setDate(now.getDate() - 1);
-    if (sameDay(d, now)) return time ? fmt.time(d) : '今天';
-    if (sameDay(d, y)) return '昨天';
+    if (sameDay(d, now)) return time ? fmt.time(d) : tx('今天', 'Today');
+    if (sameDay(d, y)) return tx('昨天', 'Yesterday');
     const diff = (now - d) / 86400000;
-    if (diff > 0 && diff < 6) return WEEKDAYS[d.getDay()];
+    if (diff > 0 && diff < 6) return fmt.WEEKDAYS[d.getDay()];
     if (d.getFullYear() === now.getFullYear()) return fmt.shortDate(d);
     return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
   },
@@ -465,15 +480,19 @@ export const fmt = {
     const a = new Date(); a.setHours(0, 0, 0, 0);
     const b = new Date(d); b.setHours(0, 0, 0, 0);
     const n = Math.round((b - a) / 86400000);
-    if (n === 0) return '今天'; if (n === 1) return '明天'; if (n === -1) return '昨天';
-    if (n > 1 && n < 7) return WEEKDAYS[d.getDay()];
+    if (n === 0) return tx('今天', 'Today');
+    if (n === 1) return tx('明天', 'Tomorrow');
+    if (n === -1) return tx('昨天', 'Yesterday');
+    if (n > 1 && n < 7) return fmt.WEEKDAYS[d.getDay()];
     return d.getFullYear() === a.getFullYear() ? fmt.shortDate(d) : fmt.date(d);
   },
   ago(d) {
     d = toDate(d); if (!d) return '';
     const s = (Date.now() - d) / 1000;
-    if (s < 60) return '刚刚'; if (s < 3600) return `${Math.floor(s / 60)} 分钟前`;
-    if (s < 86400) return `${Math.floor(s / 3600)} 小时前`; if (s < 86400 * 7) return `${Math.floor(s / 86400)} 天前`;
+    if (s < 60) return tx('刚刚', 'Just now');
+    if (s < 3600) { const m = Math.floor(s / 60); return tx(`${m} 分钟前`, `${m}m ago`); }
+    if (s < 86400) { const hr = Math.floor(s / 3600); return tx(`${hr} 小时前`, `${hr}h ago`); }
+    if (s < 86400 * 7) { const dy = Math.floor(s / 86400); return tx(`${dy} 天前`, `${dy}d ago`); }
     return fmt.smart(d);
   },
   isoDate(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; },
@@ -499,8 +518,8 @@ export function download(url) {
   a.remove();
 }
 
-export function copyText(text, msg = '已复制') {
-  navigator.clipboard.writeText(text).then(() => toast(msg, 'success', 1600), toastError);
+export function copyText(text, msg) {
+  navigator.clipboard.writeText(text).then(() => toast(msg ?? tx('已复制', 'Copied'), 'success', 1600), toastError);
 }
 
 /** Pick files with the native dialog. Promise<File[]> */

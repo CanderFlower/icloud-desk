@@ -16,6 +16,7 @@ from typing import Any, Callable, Iterable
 
 from fastapi import HTTPException
 
+from .i18n import tr
 from .notes_crdt import CRDTError, new_document, replace_document, validate
 from .notes_proto import ProtoError, TTString, decode_text_data, encode_text_data
 from .notes_text import (
@@ -114,8 +115,11 @@ def _title_snippet(body: str) -> tuple[str, str]:
     title, snippet = title_and_snippet(body)
     if not snippet:
         n = body.count("\ufffc")
-        snippet = f"{n} 个附件" if n else EMPTY_SNIPPET
-    return title or EMPTY_TITLE, snippet
+        if n:
+            snippet = tr(f"{n} 个附件", f"{n} attachment" if n == 1 else f"{n} attachments")
+        else:
+            snippet = tr(EMPTY_SNIPPET, "No additional text")
+    return title or tr(EMPTY_TITLE, "New Note"), snippet
 
 
 def _iso(ms: Any) -> str | None:
@@ -126,21 +130,21 @@ def _iso(ms: Any) -> str | None:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
 
 
-_ERRORS = {
-    "CONFLICT": (409, "备忘录已在其他设备上被修改，请刷新后重试"),
-    "ATOMIC_ERROR": (409, "同批次中的其他修改失败，本次修改未保存"),
-    "NOT_FOUND": (404, "备忘录或文件夹不存在（可能已被删除）"),
-    "UNKNOWN_ITEM": (404, "备忘录或文件夹不存在（可能已被删除）"),
-    "ACCESS_DENIED": (403, "没有权限修改这条备忘录"),
-    "PERMISSION_FAILURE": (403, "没有权限修改这条备忘录"),
-    "AUTHENTICATION_FAILED": (401, "iCloud 会话已失效，请重新登录"),
-    "AUTHENTICATION_REQUIRED": (401, "iCloud 会话已失效，请重新登录"),
-    "QUOTA_EXCEEDED": (507, "iCloud 存储空间已满"),
-    "THROTTLED": (429, "iCloud 请求过于频繁，请稍后再试"),
-    "TRY_AGAIN_LATER": (503, "iCloud 暂时不可用，请稍后再试"),
-    "VALIDATING_REFERENCE_ERROR": (404, "目标文件夹不存在"),
-    "ZONE_NOT_FOUND": (404, "找不到备忘录数据区（Notes zone）"),
-    "LIMIT_EXCEEDED": (413, "备忘录内容过大"),
+_ERRORS: dict[str, tuple[int, str, str]] = {
+    "CONFLICT": (409, "备忘录已在其他设备上被修改，请刷新后重试", "This note was modified on another device. Refresh and try again."),
+    "ATOMIC_ERROR": (409, "同批次中的其他修改失败，本次修改未保存", "Another change in the same batch failed; this change was not saved."),
+    "NOT_FOUND": (404, "备忘录或文件夹不存在（可能已被删除）", "Note or folder not found (it may have been deleted)."),
+    "UNKNOWN_ITEM": (404, "备忘录或文件夹不存在（可能已被删除）", "Note or folder not found (it may have been deleted)."),
+    "ACCESS_DENIED": (403, "没有权限修改这条备忘录", "Permission denied to modify this note."),
+    "PERMISSION_FAILURE": (403, "没有权限修改这条备忘录", "Permission denied to modify this note."),
+    "AUTHENTICATION_FAILED": (401, "iCloud 会话已失效，请重新登录", "iCloud session expired. Please sign in again."),
+    "AUTHENTICATION_REQUIRED": (401, "iCloud 会话已失效，请重新登录", "iCloud session expired. Please sign in again."),
+    "QUOTA_EXCEEDED": (507, "iCloud 存储空间已满", "iCloud storage is full."),
+    "THROTTLED": (429, "iCloud 请求过于频繁，请稍后再试", "Too many requests to iCloud. Please try again later."),
+    "TRY_AGAIN_LATER": (503, "iCloud 暂时不可用，请稍后再试", "iCloud is temporarily unavailable. Please try again later."),
+    "VALIDATING_REFERENCE_ERROR": (404, "目标文件夹不存在", "Target folder not found."),
+    "ZONE_NOT_FOUND": (404, "找不到备忘录数据区（Notes zone）", "Notes CloudKit zone not found."),
+    "LIMIT_EXCEEDED": (413, "备忘录内容过大", "Note content is too large."),
 }
 
 
@@ -148,10 +152,14 @@ def raise_for_server_error(entry: dict[str, Any]) -> None:
     code = entry.get("serverErrorCode")
     if not code:
         return
-    status, detail = _ERRORS.get(code, (502, "iCloud 拒绝了这次修改"))
+    if code in _ERRORS:
+        status, zh_msg, en_msg = _ERRORS[code]
+        detail = tr(zh_msg, en_msg)
+    else:
+        status, detail = 502, tr("iCloud 拒绝了这次修改", "iCloud rejected this modification")
     reason = entry.get("reason")
     if status == 502 and reason:
-        detail = f"{detail}：{code} {reason}"
+        detail = f"{detail}: {code} {reason}" if tr("", "1") else f"{detail}：{code} {reason}"
     raise HTTPException(status, detail)
 
 
@@ -170,7 +178,8 @@ class NoteState:
     def extras(self) -> dict[str, Any]:
         markdown = render_markdown(self.doc) if self.doc is not None else None
         if self.locked:
-            code, blocker = "locked", "这条备忘录已加锁，无法通过网页接口编辑"
+            code = "locked"
+            blocker = tr("这条备忘录已加锁，无法通过网页接口编辑", "This note is locked and cannot be edited via the web API")
         elif not self.check.editable:
             code, blocker = self.check.code, self.check.blocker
         else:
@@ -188,18 +197,27 @@ class NoteState:
 def note_state(record: dict[str, Any]) -> NoteState:
     locked = record.get("recordType") == LOCKED_TYPE
     if locked:
-        return NoteState(record, None, EditCheck(False, "locked", "已加锁"), True)
+        return NoteState(record, None, EditCheck(False, "locked", tr("已加锁", "Locked")), True)
     body = field_value(record, "TextDataEncrypted")
     if not body:
         if field_value(record, "TextDataAsset"):
-            check = EditCheck(False, "asset_body", "这条备忘录正文过大（以文件形式存储），暂不支持编辑")
+            check = EditCheck(
+                False,
+                "asset_body",
+                tr("这条备忘录正文过大（以文件形式存储），暂不支持编辑", "This note's body is stored as an asset and cannot be edited here"),
+            )
         else:
             check = EditCheck(True)  # empty note
         return NoteState(record, None, check, False)
     try:
         doc = decode_text_data(body)
     except (ProtoError, UnicodeDecodeError, ValueError):
-        return NoteState(record, None, EditCheck(False, "unsupported", "无法解析这条备忘录的正文格式"), False)
+        return NoteState(
+            record,
+            None,
+            EditCheck(False, "unsupported", tr("无法解析这条备忘录的正文格式", "Cannot parse this note's body format")),
+            False,
+        )
     return NoteState(record, doc, check_editable(doc), False)
 
 
@@ -225,9 +243,9 @@ class NotesWriter:
         try:
             return self._post(path, payload) or {}
         except CloudKitRateLimited as exc:
-            raise HTTPException(429, "iCloud 请求过于频繁，请稍后再试") from exc
+            raise HTTPException(429, tr("iCloud 请求过于频繁，请稍后再试", "Too many requests to iCloud. Please try again later.")) from exc
         except CloudKitAuthError as exc:
-            raise HTTPException(401, "iCloud 会话已失效，请重新登录") from exc
+            raise HTTPException(401, tr("iCloud 会话已失效，请重新登录", "iCloud session expired. Please sign in again.")) from exc
         except CloudKitApiError as exc:
             body = getattr(exc, "payload", None)
             if isinstance(body, dict):
@@ -236,7 +254,7 @@ class NotesWriter:
                 for entry in body.get("records") or []:
                     if isinstance(entry, dict):
                         raise_for_server_error(entry)
-            raise HTTPException(502, f"iCloud 返回错误：{exc}") from exc
+            raise HTTPException(502, tr(f"iCloud 返回错误：{exc}", f"iCloud returned an error: {exc}")) from exc
 
     def lookup(self, names: Iterable[str]) -> dict[str, dict[str, Any]]:
         names = list(names)
@@ -252,10 +270,11 @@ class NotesWriter:
                 out[entry["recordName"]] = entry
         return out
 
-    def lookup_one(self, name: str, what: str = "备忘录") -> dict[str, Any]:
+    def lookup_one(self, name: str, what: str | None = None) -> dict[str, Any]:
         rec = self.lookup([name]).get(name)
         if rec is None or rec.get("deleted"):
-            raise HTTPException(404, f"{what}不存在")
+            label = what or tr("备忘录", "Note")
+            raise HTTPException(404, tr(f"{label}不存在", f"{label} not found"))
         return rec
 
     def modify(self, operations: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -291,13 +310,13 @@ class NotesWriter:
 
     def _check_folder(self, folder_id: str) -> None:
         if folder_id == TRASH_FOLDER:
-            raise HTTPException(400, "不能在“最近删除”中新建备忘录")
+            raise HTTPException(400, tr("不能在“最近删除”中新建备忘录", "Cannot create notes in Recently Deleted"))
         if folder_id != DEFAULT_FOLDER:
-            rec = self.lookup_one(folder_id, "文件夹")
+            rec = self.lookup_one(folder_id, tr("文件夹", "Folder"))
             if rec.get("recordType") != "Folder":
-                raise HTTPException(400, "folder_id 不是文件夹")
+                raise HTTPException(400, tr("folder_id 不是文件夹", "folder_id is not a folder"))
             if field_value(rec, "Deleted"):
-                raise HTTPException(404, "文件夹已被删除")
+                raise HTTPException(404, tr("文件夹已被删除", "Folder has been deleted"))
 
     def create_note(self, folder_id: str | None, text: str) -> dict[str, Any]:
         folder_id = folder_id or DEFAULT_FOLDER
@@ -340,15 +359,15 @@ class NotesWriter:
     ) -> dict[str, Any]:
         state = self.get_state(note_id)
         if state.locked:
-            raise HTTPException(423, "这条备忘录已加锁，无法通过网页接口编辑")
+            raise HTTPException(423, tr("这条备忘录已加锁，无法通过网页接口编辑", "This note is locked and cannot be edited via the web API"))
         if change_tag and state.change_tag and change_tag != state.change_tag:
-            raise HTTPException(409, "备忘录已在其他设备上被修改，请刷新后重试")
+            raise HTTPException(409, tr("备忘录已在其他设备上被修改，请刷新后重试", "This note was modified on another device. Refresh and try again."))
         if not state.check.editable:
             if state.check.code != "attachments" or not force:
                 status = 409
-                detail = state.check.blocker or "无法编辑这条备忘录"
+                detail = state.check.blocker or tr("无法编辑这条备忘录", "Cannot edit this note")
                 if state.check.code == "attachments":
-                    detail += "；如确认要覆盖，请使用 force=true"
+                    detail += tr("；如确认要覆盖，请使用 force=true", "; pass force=true to overwrite")
                 raise HTTPException(status, detail)
 
         paras = parse_markdown(text or "")
@@ -362,7 +381,7 @@ class NotesWriter:
                 doc = new_document(body, runs)
             validate(doc)
         except CRDTError as exc:
-            raise HTTPException(409, f"无法安全地修改这条备忘录的正文结构（{exc}）") from exc
+            raise HTTPException(409, tr(f"无法安全地修改这条备忘录的正文结构（{exc}）", f"Cannot safely modify this note's structure ({exc})")) from exc
         title, snippet = _title_snippet(body)
         ts = now_ms()
         fields = {
@@ -404,7 +423,7 @@ class NotesWriter:
 
     def move_note(self, note_id: str, folder_id: str) -> dict[str, Any]:
         if not folder_id:
-            raise HTTPException(400, "缺少目标文件夹 folder_id")
+            raise HTTPException(400, tr("缺少目标文件夹 folder_id", "Missing target folder_id"))
         record = self.lookup_one(note_id)
         if folder_id != TRASH_FOLDER:
             self._check_folder(folder_id)
@@ -426,9 +445,9 @@ class NotesWriter:
     def create_folder(self, title: str, parent_id: str | None = None) -> dict[str, Any]:
         title = (title or "").strip()
         if not title:
-            raise HTTPException(400, "文件夹名称不能为空")
+            raise HTTPException(400, tr("文件夹名称不能为空", "Folder name cannot be empty"))
         if parent_id in SPECIAL_FOLDERS:
-            raise HTTPException(400, "不能在系统文件夹下创建子文件夹")
+            raise HTTPException(400, tr("不能在系统文件夹下创建子文件夹", "Cannot create subfolders inside a system folder"))
         if parent_id:
             self._check_folder(parent_id)
         record_name = str(uuidlib.uuid4()).upper()
@@ -443,12 +462,12 @@ class NotesWriter:
     def rename_folder(self, folder_id: str, title: str) -> dict[str, Any]:
         title = (title or "").strip()
         if not title:
-            raise HTTPException(400, "文件夹名称不能为空")
+            raise HTTPException(400, tr("文件夹名称不能为空", "Folder name cannot be empty"))
         if folder_id in SPECIAL_FOLDERS:
-            raise HTTPException(400, "系统文件夹不能重命名")
-        record = self.lookup_one(folder_id, "文件夹")
+            raise HTTPException(400, tr("系统文件夹不能重命名", "System folders cannot be renamed"))
+        record = self.lookup_one(folder_id, tr("文件夹", "Folder"))
         if record.get("recordType") != "Folder":
-            raise HTTPException(400, "不是文件夹")
+            raise HTTPException(400, tr("不是文件夹", "Not a folder"))
         self.modify([self._update(record, {"TitleEncrypted": f_encrypted(title)})])
         return {"id": folder_id, "name": title, "title": title,
                 "parent_id": ref_name(field_value(record, "ParentFolder"))}
@@ -457,10 +476,10 @@ class NotesWriter:
         """icloud.com ``deleteFolder``: notes go to Recently Deleted, subfolders are
         deleted recursively, then the folder record itself is removed."""
         if folder_id in SPECIAL_FOLDERS:
-            raise HTTPException(400, "系统文件夹不能删除")
-        record = self.lookup_one(folder_id, "文件夹")
+            raise HTTPException(400, tr("系统文件夹不能删除", "System folders cannot be deleted"))
+        record = self.lookup_one(folder_id, tr("文件夹", "Folder"))
         if record.get("recordType") != "Folder":
-            raise HTTPException(400, "不是文件夹")
+            raise HTTPException(400, tr("不是文件夹", "Not a folder"))
         folder_ids = [folder_id, *self._descendant_folders(folder_id)]
         note_ids = self._notes_in(folder_ids)
         ops: list[dict[str, Any]] = []

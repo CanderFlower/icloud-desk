@@ -21,6 +21,7 @@ from pyicloud.exceptions import PyiCloudException
 
 from . import __version__
 from .config import WEB_DIR
+from .i18n import normalize_lang, tr, use_lang
 from .icloud import NotLoggedIn, icloud
 
 log = logging.getLogger("icloud-desk")
@@ -72,10 +73,18 @@ def _host_ok(request: Request) -> bool:
     return host in _LOOPBACK
 
 
-_NO_TOKEN_PAGE = """<!doctype html><meta charset="utf-8"><title>iCloud Desk</title>
-<body style="font:15px -apple-system,'Segoe UI',sans-serif;display:grid;place-items:center;height:100vh;margin:0;color:#555">
-<div style="text-align:center"><h2 style="color:#111">请从 iCloud Desk 应用打开</h2>
-<p>浏览器访问需要授权链接，可在终端运行 <code>icd ui</code> 打开。</p></div></body>"""
+def _no_token_page() -> str:
+    title = tr("请从 iCloud Desk 应用打开", "Please open from the iCloud Desk app")
+    body = tr(
+        "浏览器访问需要授权链接，可在终端运行 <code>icd ui</code> 打开。",
+        "Browser access requires an authorized link. Run <code>icd ui</code> in a terminal to open it.",
+    )
+    return (
+        '<!doctype html><meta charset="utf-8"><title>iCloud Desk</title>\n'
+        "<body style=\"font:15px -apple-system,'Segoe UI',sans-serif;display:grid;place-items:center;height:100vh;margin:0;color:#555\">\n"
+        f'<div style="text-align:center"><h2 style="color:#111">{title}</h2>\n'
+        f"<p>{body}</p></div></body>"
+    )
 
 
 def create_app() -> FastAPI:
@@ -84,26 +93,31 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def _guard(request: Request, call_next):
-        if not _host_ok(request):
-            return JSONResponse({"error": "forbidden host"}, status_code=403)
-        path = request.url.path
-        if path.startswith("/api/"):
-            tok = _request_token(request)
-            if not tok or not hmac.compare_digest(tok, _token()):
-                return JSONResponse({"error": "缺少或错误的访问令牌", "code": "bad_token"}, status_code=403)
-            activity.begin()
-            try:
-                return await call_next(request)
-            finally:
-                activity.end()
-        resp = await call_next(request)
-        # Static UI: always revalidate (ETag) so upgrades never serve stale JS/CSS.
-        resp.headers.setdefault("Cache-Control", "no-cache")
-        return resp
+        lang = normalize_lang(request.headers.get("accept-language"), fallback="zh-CN")
+        with use_lang(lang):
+            if not _host_ok(request):
+                return JSONResponse({"error": "forbidden host"}, status_code=403)
+            path = request.url.path
+            if path.startswith("/api/"):
+                tok = _request_token(request)
+                if not tok or not hmac.compare_digest(tok, _token()):
+                    return JSONResponse(
+                        {"error": tr("缺少或错误的访问令牌", "Missing or invalid access token"), "code": "bad_token"},
+                        status_code=403,
+                    )
+                activity.begin()
+                try:
+                    return await call_next(request)
+                finally:
+                    activity.end()
+            resp = await call_next(request)
+            # Static UI: always revalidate (ETag) so upgrades never serve stale JS/CSS.
+            resp.headers.setdefault("Cache-Control", "no-cache")
+            return resp
 
     @app.exception_handler(NotLoggedIn)
     async def _not_logged_in(_: Request, exc: NotLoggedIn):
-        return JSONResponse({"error": exc.message, "state": exc.state}, status_code=401)
+        return JSONResponse({"error": exc.localized_message(), "state": exc.state}, status_code=401)
 
     @app.exception_handler(ValueError)
     async def _value_error(_: Request, exc: ValueError):
@@ -116,7 +130,10 @@ def create_app() -> FastAPI:
     @app.exception_handler(PyiCloudException)
     async def _icloud_error(_: Request, exc: PyiCloudException):
         log.exception("iCloud error", exc_info=exc)
-        return JSONResponse({"error": f"iCloud 返回错误：{exc}", "type": type(exc).__name__}, status_code=502)
+        return JSONResponse(
+            {"error": tr(f"iCloud 返回错误：{exc}", f"iCloud returned an error: {exc}"), "type": type(exc).__name__},
+            status_code=502,
+        )
 
     @app.exception_handler(Exception)
     async def _any_error(_: Request, exc: Exception):
@@ -155,13 +172,13 @@ def create_app() -> FastAPI:
     def index(request: Request, token: str | None = None):
         if token:
             if not hmac.compare_digest(token, _token()):
-                return HTMLResponse(_NO_TOKEN_PAGE, status_code=403)
+                return HTMLResponse(_no_token_page(), status_code=403)
             resp = RedirectResponse("/", status_code=303)
             resp.set_cookie(COOKIE, token, max_age=10 * 365 * 86400, httponly=True, samesite="strict", path="/")
             return resp
         cookie = request.cookies.get(COOKIE)
         if not cookie or not hmac.compare_digest(cookie, _token()):
-            return HTMLResponse(_NO_TOKEN_PAGE, status_code=403)
+            return HTMLResponse(_no_token_page(), status_code=403)
         return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-store"})
 
     app.mount("/", StaticFiles(directory=WEB_DIR), name="web")

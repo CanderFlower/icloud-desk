@@ -40,6 +40,8 @@ internal sealed class MainForm : Form
     private readonly ShellSettings _settings = ShellSettings.Load();
     private NotifyIcon? _tray;
     private ToolStripMenuItem? _trayShowItem;
+    private ToolStripMenuItem? _trayCloseToTrayItem;
+    private ToolStripMenuItem? _trayQuitItem;
     private bool _hotkeyRegistered;
     private bool _exiting;
 
@@ -48,6 +50,7 @@ internal sealed class MainForm : Form
     public MainForm(LaunchOptions options)
     {
         _options = options;
+        I18n.Preference = _settings.Language;
         _theme = Theme.ForDark(Theme.SystemPrefersDark());
 
         Text = AppPaths.AppTitle;
@@ -147,23 +150,40 @@ internal sealed class MainForm : Form
 
     private void CreateTray()
     {
-        _trayShowItem = new ToolStripMenuItem("显示 iCloud Desk", null, (_, _) => ShowFromTray())
+        _trayShowItem = new ToolStripMenuItem("", null, (_, _) => ShowFromTray())
         {
             Font = new Font(SystemFonts.MenuFont ?? Control.DefaultFont, FontStyle.Bold),
             ShortcutKeyDisplayString = ToggleHotkeyText,
         };
-        var closeToTray = new ToolStripMenuItem("关闭窗口时隐藏到托盘") { Checked = _settings.CloseToTray, CheckOnClick = true };
-        closeToTray.CheckedChanged += (_, _) =>
+        _trayCloseToTrayItem = new ToolStripMenuItem("") { Checked = _settings.CloseToTray, CheckOnClick = true };
+        _trayCloseToTrayItem.CheckedChanged += (_, _) =>
         {
-            _settings.CloseToTray = closeToTray.Checked;
+            _settings.CloseToTray = _trayCloseToTrayItem.Checked;
             _settings.Save();
         };
+        _trayQuitItem = new ToolStripMenuItem("", null, (_, _) => ExitApp());
         var menu = new ContextMenuStrip();
-        menu.Items.AddRange([_trayShowItem, closeToTray, new ToolStripSeparator(), new ToolStripMenuItem("退出", null, (_, _) => ExitApp())]);
+        menu.Items.AddRange([_trayShowItem, _trayCloseToTrayItem, new ToolStripSeparator(), _trayQuitItem]);
+        UpdateTrayTexts();
 
         _tray = new NotifyIcon { Icon = AppIcon.Get(16) ?? Icon, Text = AppPaths.AppTitle, ContextMenuStrip = menu, Visible = true };
         _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ShowFromTray(); };
         _tray.BalloonTipClicked += (_, _) => ShowFromTray();
+    }
+
+    private void UpdateTrayTexts()
+    {
+        if (_trayShowItem is not null)
+        {
+            _trayShowItem.Text = I18n.Tr("显示 iCloud Desk", "Show iCloud Desk");
+            _trayShowItem.ShortcutKeyDisplayString = !IsHandleCreated || _hotkeyRegistered
+                ? ToggleHotkeyText
+                : I18n.Tr($"{ToggleHotkeyText}（被占用）", $"{ToggleHotkeyText} (in use)");
+        }
+        if (_trayCloseToTrayItem is not null)
+            _trayCloseToTrayItem.Text = I18n.Tr("关闭窗口时隐藏到托盘", "Hide to tray when closing");
+        if (_trayQuitItem is not null)
+            _trayQuitItem.Text = I18n.Tr("退出", "Quit");
     }
 
     private void RegisterToggleHotkey()
@@ -171,8 +191,7 @@ internal sealed class MainForm : Form
         _hotkeyRegistered = Native.RegisterHotKey(Handle, ToggleHotkeyId, Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT, (uint)Keys.R);
         if (!_hotkeyRegistered)
             Log.Error($"RegisterHotKey({ToggleHotkeyText}) failed: {Marshal.GetLastWin32Error()} (already used by another app?)");
-        if (_trayShowItem is not null)
-            _trayShowItem.ShortcutKeyDisplayString = _hotkeyRegistered ? ToggleHotkeyText : $"{ToggleHotkeyText}（被占用）";
+        UpdateTrayTexts();
     }
 
     private void ToggleFromHotkey()
@@ -191,8 +210,13 @@ internal sealed class MainForm : Form
         {
             _settings.TrayHintShown = true;
             _settings.Save();
-            _tray.ShowBalloonTip(5000, "iCloud Desk 仍在后台运行",
-                $"点击托盘图标或按 {ToggleHotkeyText} 重新打开。右键托盘图标可以退出或更改关闭行为。", ToolTipIcon.None);
+            _tray.ShowBalloonTip(
+                5000,
+                I18n.Tr("iCloud Desk 仍在后台运行", "iCloud Desk is still running"),
+                I18n.Tr(
+                    $"点击托盘图标或按 {ToggleHotkeyText} 重新打开。右键托盘图标可以退出或更改关闭行为。",
+                    $"Click the tray icon or press {ToggleHotkeyText} to reopen. Right-click the tray icon to quit or change close behavior."),
+                ToolTipIcon.None);
         }
     }
 
@@ -374,7 +398,7 @@ internal sealed class MainForm : Form
         _starting = true;
         try
         {
-            ShowSplash("正在启动 iCloud Desk…");
+            ShowSplash(I18n.Tr("正在启动 iCloud Desk…", "Starting iCloud Desk…"));
 
             string? runtime = null;
             try
@@ -387,9 +411,14 @@ internal sealed class MainForm : Form
             }
             if (string.IsNullOrEmpty(runtime))
             {
-                ShowError("需要 Microsoft Edge WebView2 运行时",
-                    "iCloud Desk 使用 WebView2 显示界面，但这台电脑上没有安装它。请下载并安装“常青版”WebView2 运行时，然后点击“重试”。",
-                    null, "下载 WebView2 运行时", WebView2DownloadUrl);
+                ShowError(
+                    I18n.Tr("需要 Microsoft Edge WebView2 运行时", "Microsoft Edge WebView2 Runtime Required"),
+                    I18n.Tr(
+                        "iCloud Desk 使用 WebView2 显示界面，但这台电脑上没有安装它。请下载并安装“常青版”WebView2 运行时，然后点击“重试”。",
+                        "iCloud Desk uses WebView2 to display its interface, which is not installed on this PC. Please download and install the Evergreen WebView2 Runtime, then click Retry."),
+                    null,
+                    I18n.Tr("下载 WebView2 运行时", "Download WebView2 Runtime"),
+                    WebView2DownloadUrl);
                 return;
             }
 
@@ -404,8 +433,14 @@ internal sealed class MainForm : Form
                 Log.Error("WebView2 initialization failed", ex);
                 DisposeWebView();
                 _ = ensureTask.ContinueWith(t => _ = t.Exception, TaskScheduler.Default);
-                ShowError("无法初始化界面组件", "WebView2 初始化失败。可以尝试重试；如果问题持续，请重新安装 WebView2 运行时。", ex.Message,
-                    "下载 WebView2 运行时", WebView2DownloadUrl);
+                ShowError(
+                    I18n.Tr("无法初始化界面组件", "Failed to Initialize WebView2"),
+                    I18n.Tr(
+                        "WebView2 初始化失败。可以尝试重试；如果问题持续，请重新安装 WebView2 运行时。",
+                        "WebView2 failed to initialize. Try again, or reinstall the WebView2 Runtime if the problem persists."),
+                    ex.Message,
+                    I18n.Tr("下载 WebView2 运行时", "Download WebView2 Runtime"),
+                    WebView2DownloadUrl);
                 return;
             }
 
@@ -419,13 +454,16 @@ internal sealed class MainForm : Form
             }
             catch (CoreLaunchException ex)
             {
-                ShowError("无法启动 iCloud Desk", ex.Message, ex.Details);
+                ShowError(I18n.Tr("无法启动 iCloud Desk", "Could Not Start iCloud Desk"), ex.Message, ex.Details);
                 return;
             }
             catch (Exception ex)
             {
                 Log.Error("daemon ensure failed", ex);
-                ShowError("无法启动 iCloud Desk", "启动后台服务时出现意外错误。", ex.Message);
+                ShowError(
+                    I18n.Tr("无法启动 iCloud Desk", "Could Not Start iCloud Desk"),
+                    I18n.Tr("启动后台服务时出现意外错误。", "An unexpected error occurred while starting the background service."),
+                    ex.Message);
                 return;
             }
 
@@ -444,7 +482,7 @@ internal sealed class MainForm : Form
         _starting = true;
         try
         {
-            ShowSplash("正在重新连接 iCloud Desk 服务…");
+            ShowSplash(I18n.Tr("正在重新连接 iCloud Desk 服务…", "Reconnecting to iCloud Desk service…"));
             _daemon = await CoreLauncher.EnsureAsync(_options.Demo, _lifetime.Token);
             if (_webView?.CoreWebView2 is null)
             {
@@ -459,12 +497,15 @@ internal sealed class MainForm : Form
         }
         catch (CoreLaunchException ex)
         {
-            ShowError("与 iCloud Desk 服务的连接已断开", ex.Message, ex.Details);
+            ShowError(I18n.Tr("与 iCloud Desk 服务的连接已断开", "Lost Connection to iCloud Desk Service"), ex.Message, ex.Details);
         }
         catch (Exception ex)
         {
             Log.Error("Reconnect failed", ex);
-            ShowError("与 iCloud Desk 服务的连接已断开", "重新启动后台服务失败。", ex.Message);
+            ShowError(
+                I18n.Tr("与 iCloud Desk 服务的连接已断开", "Lost Connection to iCloud Desk Service"),
+                I18n.Tr("重新启动后台服务失败。", "Failed to restart the background service."),
+                ex.Message);
         }
         finally
         {
@@ -572,7 +613,10 @@ internal sealed class MainForm : Form
             }
             else
             {
-                ShowError("无法连接到 iCloud Desk 服务", "后台服务没有响应。", $"WebErrorStatus: {e.WebErrorStatus}");
+                ShowError(
+                    I18n.Tr("无法连接到 iCloud Desk 服务", "Cannot Connect to iCloud Desk Service"),
+                    I18n.Tr("后台服务没有响应。", "The background service is not responding."),
+                    $"WebErrorStatus: {e.WebErrorStatus}");
             }
         }
         else if (_splash.Visible)
@@ -604,7 +648,10 @@ internal sealed class MainForm : Form
             BeginInvoke(() =>
             {
                 DisposeWebView();
-                ShowError("界面组件意外退出", "WebView2 浏览器进程已退出。点击“重试”重新加载。", $"{e.ProcessFailedKind}: {e.Reason}");
+                ShowError(
+                    I18n.Tr("界面组件意外退出", "WebView2 Exited Unexpectedly"),
+                    I18n.Tr("WebView2 浏览器进程已退出。点击“重试”重新加载。", "The WebView2 browser process exited. Click Retry to reload."),
+                    $"{e.ProcessFailedKind}: {e.Reason}");
             });
         }
         else if (e.ProcessFailedKind is CoreWebView2ProcessFailedKind.RenderProcessExited or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive)
@@ -631,6 +678,18 @@ internal sealed class MainForm : Form
                     Color? caption = root.TryGetProperty("titlebar", out var tb) && Theme.TryParseHex(tb.GetString(), out var c) ? c : null;
                     _uiControlsTheme = true;
                     ApplyTheme(Theme.ForDark(dark), caption);
+                    break;
+                case "lang":
+                    string? pref = root.TryGetProperty("pref", out var pEl) ? pEl.GetString() : null;
+                    string? lang = root.TryGetProperty("lang", out var lEl) ? lEl.GetString() : null;
+                    I18n.Preference = string.IsNullOrWhiteSpace(pref) || pref == "system" ? lang : pref;
+                    if (_settings.Language != pref && !string.IsNullOrWhiteSpace(pref))
+                    {
+                        _settings.Language = pref;
+                        _settings.Save();
+                    }
+                    UpdateTrayTexts();
+                    _error.UpdateLanguage();
                     break;
                 case "open-external":
                     if (root.TryGetProperty("url", out var url)) Shell.OpenExternal(url.GetString());

@@ -1,5 +1,6 @@
 // Photos — library + albums, justified day-grouped grid, viewer, multi-select, upload.
 import { get, post, del, upload } from '../api.js';
+import { countText, lang, tx } from '../i18n.js';
 import {
   h, clear, icon, appIcon, iconBtn, btn, toolbar, segmented, menu, toast, toastError, confirmDialog,
   empty, errorBox, fmt, toDate, store, download, pickFiles, isTyping, copyText,
@@ -9,43 +10,43 @@ const PAGE = 120;
 const GAP = 4;
 const ZOOM = { s: 110, m: 170, l: 256 };
 const KNOWN = [
-  [/^(favou?rites|个人收藏)$/i, '个人收藏', 'heart'],
-  [/^(videos?|视频)$/i, '视频', 'video'],
-  [/^(live( photos)?|实况照片?)$/i, '实况照片', 'aperture'],
-  [/^(screenshots?|截屏)$/i, '截屏', 'monitor-smartphone'],
-  [/^(selfies|自拍)$/i, '自拍', 'camera'],
-  [/^(panoramas?|全景照片)$/i, '全景照片', 'image'],
-  [/^(bursts?|连拍快照)$/i, '连拍快照', 'layers'],
-  [/^(slo-?mo|慢动作)$/i, '慢动作', 'film'],
-  [/^(time-?lapse|延时摄影)$/i, '延时摄影', 'clock'],
-  [/^(hidden|已隐藏)$/i, '已隐藏', 'eye-off'],
-  [/^(recently deleted|最近删除)$/i, '最近删除', 'trash-2'],
-  [/^(recently added|最近添加)$/i, '最近添加', 'history'],
+  [/^(favou?rites|个人收藏)$/i, '个人收藏', 'Favorites', 'heart'],
+  [/^(videos?|视频)$/i, '视频', 'Videos', 'video'],
+  [/^(live( photos)?|实况照片?)$/i, '实况照片', 'Live Photos', 'aperture'],
+  [/^(screenshots?|截屏)$/i, '截屏', 'Screenshots', 'monitor-smartphone'],
+  [/^(selfies|自拍)$/i, '自拍', 'Selfies', 'camera'],
+  [/^(panoramas?|全景照片)$/i, '全景照片', 'Panoramas', 'image'],
+  [/^(bursts?|连拍快照)$/i, '连拍快照', 'Bursts', 'layers'],
+  [/^(slo-?mo|慢动作)$/i, '慢动作', 'Slo-mo', 'film'],
+  [/^(time-?lapse|延时摄影)$/i, '延时摄影', 'Time-lapse', 'clock'],
+  [/^(hidden|已隐藏)$/i, '已隐藏', 'Hidden', 'eye-off'],
+  [/^(recently deleted|最近删除)$/i, '最近删除', 'Recently Deleted', 'trash-2'],
+  [/^(recently added|最近添加)$/i, '最近添加', 'Recently Added', 'history'],
 ];
 const PHOTO_EXT = /\.(heic|heif|jpe?g|png|gif|webp|tiff?|bmp|dng|mov|mp4|m4v|avi|3gp)$/i;
 
 export function albumMeta(a) {
-  if (!a || a.id === '__all__') return { name: '图库', icon: 'images', smart: true };
+  if (!a || a.id === '__all__') return { name: tx('图库', 'Library'), icon: 'images', smart: true };
   const n = (a.name || '').trim();
-  for (const [re, name, ic] of KNOWN) if (re.test(n)) return { name, icon: ic, smart: true };
-  return { name: n || '未命名相簿', icon: 'image', smart: false };
+  for (const [re, zh, en, ic] of KNOWN) if (re.test(n)) return { name: tx(zh, en), icon: ic, smart: true };
+  return { name: n || tx('未命名相簿', 'Untitled Album'), icon: 'image', smart: false };
 }
 
 const fileUrl = (p, version = 'thumb', dl = false) => `/api/photos/file?id=${encodeURIComponent(p.id)}&version=${version}${dl ? '&download=1' : ''}`;
 const aspect = (p) => (p.width > 0 && p.height > 0 ? Math.min(3, Math.max(0.4, p.width / p.height)) : 1);
-const kindLabel = (p) => (p.type === 'movie' ? '视频' : p.live ? '实况照片' : '照片');
+const kindLabel = (p) => (p.type === 'movie' ? tx('视频', 'Video') : p.live ? tx('实况照片', 'Live Photo') : tx('照片', 'Photo'));
 
 function dayLabel(d) {
-  if (!d) return '未知日期';
+  if (!d) return tx('未知日期', 'Unknown Date');
   const now = new Date(); const y = new Date(); y.setDate(now.getDate() - 1);
-  if (fmt.sameDay(d, now)) return '今天';
-  if (fmt.sameDay(d, y)) return '昨天';
+  if (fmt.sameDay(d, now)) return tx('今天', 'Today');
+  if (fmt.sameDay(d, y)) return tx('昨天', 'Yesterday');
   return d.getFullYear() === now.getFullYear() ? fmt.shortDate(d) : fmt.date(d);
 }
 
 export default {
   id: 'photos',
-  title: '照片',
+  get title() { return tx('照片', 'Photos'); },
   app: 'photos',
   mount(el, { params } = {}) {
     const S = {
@@ -61,37 +62,37 @@ export default {
     // ------------------------------------------------------------- layout
     const sideBody = h('div', { class: 'pane-body' });
     const body = h('div', { class: 'pane-body ph-body' });
-    const grid = h('div', { class: 'ph-grid', role: 'grid', 'aria-label': '照片' });
+    const grid = h('div', { class: 'ph-grid', role: 'grid', 'aria-label': tx('照片', 'Photos') });
     const sentinel = h('div', { class: 'ph-sentinel' });
     const foot = h('div', { class: 'ph-foot' });
-    const selbar = h('div', { class: 'ph-selbar', role: 'toolbar', 'aria-label': '所选项目' });
-    const dropOv = h('div', { class: 'drop-overlay hidden' }, icon('cloud-upload', { size: 'xl' }), h('span', {}, '松开以上传'));
+    const selbar = h('div', { class: 'ph-selbar', role: 'toolbar', 'aria-label': tx('所选项目', 'Selected items') });
+    const dropOv = h('div', { class: 'drop-overlay hidden' }, icon('cloud-upload', { size: 'xl' }), h('span', {}, tx('松开以上传', 'Drop to upload')));
     const countEl = h('span');
     let dayHeads = [];
 
     const zoomSeg = segmented([
-      { value: 's', icon: 'grid-3x3', tip: '小' },
-      { value: 'm', icon: 'layout-grid', tip: '中' },
-      { value: 'l', icon: 'square', tip: '大' },
+      { value: 's', icon: 'grid-3x3', tip: tx('小', 'Small') },
+      { value: 'm', icon: 'layout-grid', tip: tx('中', 'Medium') },
+      { value: 'l', icon: 'square', tip: tx('大', 'Large') },
     ], S.zoom, (v) => { S.zoom = v; store.set('ph.zoom', v); layout(); }, { cls: 'icons ph-zoom' });
-    const refreshBtn = iconBtn('refresh-cw', '刷新 (F5)', () => refresh());
+    const refreshBtn = iconBtn('refresh-cw', tx('刷新 (F5)', 'Refresh (F5)'), () => refresh());
     refreshBtn.dataset.refresh = '';
     const tb = toolbar({
       title: '',
       subtitle: countEl,
       right: [
-        iconBtn('images', '切换相簿', (e) => albumMenu(e.currentTarget), { cls: 'when-side-hidden' }),
+        iconBtn('images', tx('切换相簿', 'Switch album'), (e) => albumMenu(e.currentTarget), { cls: 'when-side-hidden' }),
         zoomSeg,
         h('span', { class: 'sep hide-narrow' }),
         refreshBtn,
-        h('button', { class: 'btn primary sm', type: 'button', dataset: { new: '' }, title: '上传照片或视频 (Ctrl+N)', onclick: pickUpload },
-          icon('upload'), h('span', { class: 'hide-narrow' }, '上传')),
+        h('button', { class: 'btn primary sm', type: 'button', dataset: { new: '' }, title: tx('上传照片或视频 (Ctrl+N)', 'Upload photos or videos (Ctrl+N)'), onclick: pickUpload },
+          icon('upload'), h('span', { class: 'hide-narrow' }, tx('上传', 'Upload'))),
       ],
     });
 
     const main = h('div', { class: 'pane fill ph-main' }, tb, body, selbar, dropOv);
     el.append(h('div', { class: 'panes collapse-side' },
-      h('div', { class: 'pane side ph-side' }, h('div', { class: 'pane-head ph-side-head' }, appIcon('photos', 22), h('span', { class: 'title' }, '照片')), sideBody),
+      h('div', { class: 'pane side ph-side' }, h('div', { class: 'pane-head ph-side-head' }, appIcon('photos', 22), h('span', { class: 'title' }, tx('照片', 'Photos'))), sideBody),
       main));
 
     // ------------------------------------------------------------ albums
@@ -120,8 +121,8 @@ export default {
         }, icon(m.icon), h('span', { class: 'label' }, m.name));
       };
       clear(sideBody, h('div', { class: 'side-list' },
-        h('div', { class: 'side-title' }, '照片'), lib.map(item),
-        mine.length ? [h('div', { class: 'side-title' }, '我的相簿'), mine.map(item)] : null));
+        h('div', { class: 'side-title' }, tx('照片', 'Photos')), lib.map(item),
+        mine.length ? [h('div', { class: 'side-title' }, tx('我的相簿', 'My Albums')), mine.map(item)] : null));
     }
 
     function albumMenu(anchor) {
@@ -164,7 +165,7 @@ export default {
       } catch (e) {
         if (gen !== S.gen) return;
         if (first) { S.hasMore = false; clear(body, errorBox(e)); } else {
-          foot.replaceChildren(btn('重试', { size: 'sm', icon: 'rotate-ccw', onclick: () => loadMore() }));
+          foot.replaceChildren(btn(tx('重试', 'Retry'), { size: 'sm', icon: 'rotate-ccw', onclick: () => loadMore() }));
           toastError(e);
         }
       } finally {
@@ -181,7 +182,7 @@ export default {
     function updateTitle() {
       tb.setTitle(albumMeta(curAlbum()).name);
       const n = S.items.length;
-      countEl.textContent = n ? `${n}${S.hasMore ? '+' : ''} 项` : '';
+      countEl.textContent = n ? (lang.isEn ? `${n}${S.hasMore ? '+' : ''} ${n === 1 ? 'item' : 'items'}` : `${n}${S.hasMore ? '+' : ''} 项`) : '';
     }
 
     // ------------------------------------------------------------ render
@@ -189,8 +190,9 @@ export default {
       updateTitle();
       if (!S.items.length) {
         clear(body, empty({
-          app: 'photos', title: S.album === '__all__' ? '图库中没有照片' : '这个相簿是空的',
-          text: '把照片或视频拖到这里，或点击“上传”。', action: { label: '上传照片', icon: 'upload', onClick: pickUpload },
+          app: 'photos', title: S.album === '__all__' ? tx('图库中没有照片', 'No Photos in Library') : tx('这个相簿是空的', 'This Album Is Empty'),
+          text: tx('把照片或视频拖到这里，或点击“上传”。', 'Drag photos or videos here, or click Upload.'),
+          action: { label: tx('上传照片', 'Upload Photos'), icon: 'upload', onClick: pickUpload },
         }));
         return;
       }
@@ -199,8 +201,10 @@ export default {
       if (S.hasMore) foot.replaceChildren();
       else {
         const v = S.items.filter((p) => p.type === 'movie').length;
+        const pCount = S.items.length - v;
         foot.replaceChildren(h('div', { class: 'ph-total' },
-          [S.items.length - v ? `${S.items.length - v} 张照片` : null, v ? `${v} 个视频` : null].filter(Boolean).join('、')));
+          [pCount ? countText(pCount, '张照片', 'photo') : null, v ? countText(v, '个视频', 'video') : null]
+            .filter(Boolean).join(lang.isEn ? ', ' : '、')));
       }
     }
 
@@ -267,11 +271,11 @@ export default {
           if (!all) S.anchor = sec.items[sec.items.length - 1].id;
           updateSelbar(); refreshDayButtons();
         },
-      }, sec.items.every((p) => S.sel.has(p.id)) ? '取消选择' : '选择');
+      }, sec.items.every((p) => S.sel.has(p.id)) ? tx('取消选择', 'Deselect') : tx('选择', 'Select'));
       dayHeads.push({ btn: selBtn, items: sec.items });
       return h('div', { class: 'ph-day' },
         h('span', { class: 'ph-day-title' }, dayLabel(sec.date)),
-        h('span', { class: 'ph-day-sub' }, [sec.date ? fmt.weekday(sec.date) : null, `${n} 项`].filter(Boolean).join(' · ')),
+        h('span', { class: 'ph-day-sub' }, [sec.date ? fmt.weekday(sec.date) : null, countText(n, '项', 'item')].filter(Boolean).join(' · ')),
         selBtn);
     }
 
@@ -296,10 +300,10 @@ export default {
       img,
       h('span', { class: 'ph-shade' }),
       p.type === 'movie' ? h('span', { class: 'ph-badge ph-video' }, icon('play', { size: 11 })) : null,
-      p.live ? h('span', { class: 'ph-badge ph-live', title: '实况照片' }, icon('aperture', { size: 14 })) : null,
-      h('span', { class: 'ph-fav', title: '个人收藏' }, icon('heart', { size: 14 })),
+      p.live ? h('span', { class: 'ph-badge ph-live', title: tx('实况照片', 'Live Photo') }, icon('aperture', { size: 14 })) : null,
+      h('span', { class: 'ph-fav', title: tx('个人收藏', 'Favorite') }, icon('heart', { size: 14 })),
       h('button', {
-        class: 'ph-check', type: 'button', tabindex: -1, 'aria-label': '选择',
+        class: 'ph-check', type: 'button', tabindex: -1, 'aria-label': tx('选择', 'Select'),
         onclick: (e) => { e.stopPropagation(); if (e.shiftKey) selectRange(p); else toggleSel(p); },
       }, icon('check', { size: 12 })));
       img.addEventListener('load', () => t.classList.add('loaded'), { once: true });
@@ -355,7 +359,7 @@ export default {
     }
 
     function refreshDayButtons() {
-      for (const d of dayHeads) d.btn.textContent = d.items.every((p) => S.sel.has(p.id)) ? '取消选择' : '选择';
+      for (const d of dayHeads) d.btn.textContent = d.items.every((p) => S.sel.has(p.id)) ? tx('取消选择', 'Deselect') : tx('选择', 'Select');
     }
 
     function updateSelbar() {
@@ -366,12 +370,12 @@ export default {
       const items = selected();
       const allFav = items.every((p) => p.favorite);
       clear(selbar,
-        h('span', { class: 'ph-sel-count' }, `已选择 ${n} 项`),
-        iconBtn(allFav ? 'heart-off' : 'heart', allFav ? '取消收藏' : '收藏', () => setFav(items, !allFav)),
-        iconBtn('download', '下载原件', () => downloadMany(items)),
-        iconBtn('trash-2', '删除', () => removeItems(items), { cls: 'danger' }),
+        h('span', { class: 'ph-sel-count' }, tx(`已选择 ${n} 项`, `${countText(n, '项', 'item')} selected`)),
+        iconBtn(allFav ? 'heart-off' : 'heart', allFav ? tx('取消收藏', 'Unfavorite') : tx('收藏', 'Favorite'), () => setFav(items, !allFav)),
+        iconBtn('download', tx('下载原件', 'Download Original'), () => downloadMany(items)),
+        iconBtn('trash-2', tx('删除', 'Delete'), () => removeItems(items), { cls: 'danger' }),
         h('span', { class: 'ph-sel-sep' }),
-        btn('完成', { size: 'sm', kind: 'ghost', onclick: clearSel }));
+        btn(tx('完成', 'Done'), { size: 'sm', kind: 'ghost', onclick: clearSel }));
     }
 
     // ----------------------------------------------------------- actions
@@ -381,7 +385,7 @@ export default {
       updateSelbar(); viewer?.sync();
       try {
         for (const p of items) await post('/api/photos/favorite', { id: p.id, value });
-        if (items.length > 1) toast(value ? `已收藏 ${items.length} 项` : `已从个人收藏中移除 ${items.length} 项`, 'success');
+        if (items.length > 1) toast(value ? tx(`已收藏 ${items.length} 项`, `Added ${items.length} items to Favorites`) : tx(`已从个人收藏中移除 ${items.length} 项`, `Removed ${items.length} items from Favorites`), 'success');
       } catch (e) {
         prev.forEach(([p, v]) => { p.favorite = v; syncTile(p); });
         updateSelbar(); viewer?.sync(); toastError(e);
@@ -390,15 +394,19 @@ export default {
 
     function downloadMany(items) {
       items.forEach((p, i) => setTimeout(() => download(fileUrl(p, 'original', true)), i * 350));
-      if (items.length > 1) toast(`正在下载 ${items.length} 项`, 'info');
+      if (items.length > 1) toast(tx(`正在下载 ${items.length} 项`, `Downloading ${items.length} items`), 'info');
     }
 
     async function removeItems(items) {
       const n = items.length;
-      const ok = await confirmDialog(n === 1 ? `删除“${items[0].filename || '此项目'}”？` : `删除所选的 ${n} 项？`, {
-        title: n === 1 ? `删除${kindLabel(items[0])}` : '删除项目', okLabel: '删除', danger: true, icon: 'trash-2',
-        detail: '删除的项目会移到 iCloud 照片的“最近删除”，可在 30 天内恢复。',
-      });
+      const ok = await confirmDialog(
+        n === 1 ? tx(`删除“${items[0].filename || '此项目'}”？`, `Delete “${items[0].filename || 'this item'}”?`) : tx(`删除所选的 ${n} 项？`, `Delete ${n} selected items?`),
+        {
+          title: n === 1 ? tx(`删除${kindLabel(items[0])}`, `Delete ${kindLabel(items[0])}`) : tx('删除项目', 'Delete Items'),
+          okLabel: tx('删除', 'Delete'), danger: true, icon: 'trash-2',
+          detail: tx('删除的项目会移到 iCloud 照片的“最近删除”，可在 30 天内恢复。', 'Deleted items move to Recently Deleted in iCloud Photos and can be recovered within 30 days.'),
+        },
+      );
       if (!ok) return [];
       const done = [];
       for (const p of items) {
@@ -408,7 +416,7 @@ export default {
       S.items = S.items.filter((p) => !gone.has(p.id));
       done.forEach((id) => { tiles.delete(id); S.sel.delete(id); });
       render(); updateSelbar();
-      if (done.length) toast(done.length === 1 ? '已删除 1 项' : `已删除 ${done.length} 项`, 'success');
+      if (done.length) toast(done.length === 1 ? tx('已删除 1 项', 'Deleted 1 item') : tx(`已删除 ${done.length} 项`, `Deleted ${done.length} items`), 'success');
       return done;
     }
 
@@ -417,13 +425,13 @@ export default {
       const many = items.length > 1;
       const allFav = items.every((x) => x.favorite);
       menu(e, [
-        !many && { label: '打开', icon: 'maximize-2', onClick: () => openViewer(p.id) },
-        { label: allFav ? '从个人收藏中移除' : '添加到个人收藏', icon: allFav ? 'heart-off' : 'heart', onClick: () => setFav(items, !allFav) },
-        { label: many ? `下载 ${items.length} 项` : '下载原件', icon: 'download', onClick: () => downloadMany(items) },
-        !many && { label: S.sel.has(p.id) ? '取消选择' : '选择', icon: 'circle-check', onClick: () => toggleSel(p) },
-        !many && { label: '拷贝文件名', icon: 'copy', onClick: () => copyText(p.filename || '') },
+        !many && { label: tx('打开', 'Open'), icon: 'maximize-2', onClick: () => openViewer(p.id) },
+        { label: allFav ? tx('从个人收藏中移除', 'Remove from Favorites') : tx('添加到个人收藏', 'Add to Favorites'), icon: allFav ? 'heart-off' : 'heart', onClick: () => setFav(items, !allFav) },
+        { label: many ? tx(`下载 ${items.length} 项`, `Download ${items.length} Items`) : tx('下载原件', 'Download Original'), icon: 'download', onClick: () => downloadMany(items) },
+        !many && { label: S.sel.has(p.id) ? tx('取消选择', 'Deselect') : tx('选择', 'Select'), icon: 'circle-check', onClick: () => toggleSel(p) },
+        !many && { label: tx('拷贝文件名', 'Copy Filename'), icon: 'copy', onClick: () => copyText(p.filename || '') },
         '-',
-        { label: many ? `删除 ${items.length} 项…` : '删除…', icon: 'trash-2', danger: true, onClick: () => removeItems(items) },
+        { label: many ? tx(`删除 ${items.length} 项…`, `Delete ${items.length} Items…`) : tx('删除…', 'Delete…'), icon: 'trash-2', danger: true, onClick: () => removeItems(items) },
       ]);
     }
 
@@ -435,20 +443,20 @@ export default {
 
     async function doUpload(list) {
       const files = list.filter((f) => /^(image|video)\//.test(f.type) || PHOTO_EXT.test(f.name));
-      if (!files.length) { toast('只能上传照片或视频', 'info'); return; }
-      if (files.length < list.length) toast(`已跳过 ${list.length - files.length} 个非照片文件`, 'info');
+      if (!files.length) { toast(tx('只能上传照片或视频', 'Only photos and videos can be uploaded'), 'info'); return; }
+      if (files.length < list.length) toast(tx(`已跳过 ${list.length - files.length} 个非照片文件`, `Skipped ${list.length - files.length} unsupported file(s)`), 'info');
       const fill = h('div', { style: { width: '0%' } });
-      const label = h('span', {}, `正在上传 ${files.length} 项…`);
+      const label = h('span', {}, tx(`正在上传 ${files.length} 项…`, `Uploading ${countText(files.length, '项', 'item')}…`));
       const dismiss = toast(h('div', { class: 'ph-up' }, label, h('div', { class: 'progress ph-up-bar' }, fill)), 'info', 30 * 60 * 1000);
       const form = new FormData();
       form.append('album', albumMeta(curAlbum()).smart ? '' : S.album);
       files.forEach((f) => form.append('files', f, f.name));
       try {
         await upload('/api/photos/upload', form, {
-          onProgress: (x) => { fill.style.width = `${Math.round(x * 100)}%`; if (x >= 1) label.textContent = '正在存储到 iCloud…'; },
+          onProgress: (x) => { fill.style.width = `${Math.round(x * 100)}%`; if (x >= 1) label.textContent = tx('正在存储到 iCloud…', 'Saving to iCloud…'); },
         });
         dismiss();
-        toast(`已上传 ${files.length} 项`, 'success');
+        toast(tx(`已上传 ${files.length} 项`, `Uploaded ${countText(files.length, '项', 'item')}`), 'success');
         openAlbum(S.album);
       } catch (e) { dismiss(); toastError(e); }
     }
@@ -473,26 +481,26 @@ export default {
       const cur = () => S.items[idx];
       const stage = h('div', { class: 'ph-v-media' });
       const title = h('div', { class: 'ph-v-title' });
-      const favBtn = iconBtn('heart', '收藏 (.)', () => setFav([cur()], !cur().favorite), { cls: 'ph-v-fav' });
-      const infoBtn = iconBtn('info', '信息 (I)', () => { showInfo = !showInfo; store.set('ph.info', showInfo); sync(); });
-      const info = h('aside', { class: 'ph-v-info', 'aria-label': '信息' });
-      const prev = h('button', { class: 'ph-v-nav prev', type: 'button', 'aria-label': '上一项 (←)', onclick: () => go(-1) }, icon('chevron-left', { size: 26 }));
-      const next = h('button', { class: 'ph-v-nav next', type: 'button', 'aria-label': '下一项 (→)', onclick: () => go(1) }, icon('chevron-right', { size: 26 }));
-      const v = h('div', { class: 'ph-viewer', role: 'dialog', 'aria-modal': 'true', 'aria-label': '照片查看器', tabindex: -1 },
+      const favBtn = iconBtn('heart', tx('收藏 (.)', 'Favorite (.)'), () => setFav([cur()], !cur().favorite), { cls: 'ph-v-fav' });
+      const infoBtn = iconBtn('info', tx('信息 (I)', 'Info (I)'), () => { showInfo = !showInfo; store.set('ph.info', showInfo); sync(); });
+      const info = h('aside', { class: 'ph-v-info', 'aria-label': tx('信息', 'Info') });
+      const prev = h('button', { class: 'ph-v-nav prev', type: 'button', 'aria-label': tx('上一项 (←)', 'Previous (←)'), onclick: () => go(-1) }, icon('chevron-left', { size: 26 }));
+      const next = h('button', { class: 'ph-v-nav next', type: 'button', 'aria-label': tx('下一项 (→)', 'Next (→)'), onclick: () => go(1) }, icon('chevron-right', { size: 26 }));
+      const v = h('div', { class: 'ph-viewer', role: 'dialog', 'aria-modal': 'true', 'aria-label': tx('照片查看器', 'Photo viewer'), tabindex: -1 },
         h('div', { class: 'ph-v-top' },
-          iconBtn('x', '关闭 (Esc)', () => close()),
+          iconBtn('x', tx('关闭 (Esc)', 'Close (Esc)'), () => close()),
           title,
           h('div', { class: 'ph-v-tools' },
             favBtn, infoBtn,
-            iconBtn('download', '下载原件', () => download(fileUrl(cur(), 'original', true))),
-            iconBtn('trash-2', '删除 (Delete)', () => removeCur(), { cls: 'danger' }))),
+            iconBtn('download', tx('下载原件', 'Download Original'), () => download(fileUrl(cur(), 'original', true))),
+            iconBtn('trash-2', tx('删除 (Delete)', 'Delete (Delete)'), () => removeCur(), { cls: 'danger' }))),
         h('div', { class: 'ph-v-body' }, h('div', { class: 'ph-v-stage' }, stage, prev, next), info));
       document.body.append(v);
       v.focus();
 
       function show() {
         const p = cur();
-        clear(title, h('div', { class: 'ph-v-name' }, p.filename || '未命名'), h('div', { class: 'ph-v-date' }, `${fmt.date(p.created)} ${fmt.time(p.created)}`));
+        clear(title, h('div', { class: 'ph-v-name' }, p.filename || tx('未命名', 'Untitled')), h('div', { class: 'ph-v-date' }, `${fmt.date(p.created)} ${fmt.time(p.created)}`));
         if (p.type === 'movie') {
           const vid = h('video', { controls: true, autoplay: true, playsInline: true, poster: fileUrl(p), src: fileUrl(p, 'medium') });
           vid.addEventListener('error', () => vid.replaceWith(photoEl(p)), { once: true });
@@ -511,7 +519,7 @@ export default {
         hi.onload = () => { if (cur() === p) { img.src = hi.src; img.classList.remove('low'); } };
         hi.onerror = () => img.classList.remove('low');
         hi.src = fileUrl(p, 'medium');
-        img.addEventListener('error', () => img.replaceWith(h('div', { class: 'ph-v-broken' }, icon('image-off', { size: 40 }), '无法载入此项目')), { once: true });
+        img.addEventListener('error', () => img.replaceWith(h('div', { class: 'ph-v-broken' }, icon('image-off', { size: 40 }), tx('无法载入此项目', 'Could not load item'))), { once: true });
         return img;
       }
 
@@ -519,20 +527,20 @@ export default {
         const p = cur();
         if (!p) return;
         favBtn.classList.toggle('on', !!p.favorite);
-        favBtn.dataset.tip = p.favorite ? '取消收藏 (.)' : '收藏 (.)';
+        favBtn.dataset.tip = p.favorite ? tx('取消收藏 (.)', 'Unfavorite (.)') : tx('收藏 (.)', 'Favorite (.)');
         infoBtn.classList.toggle('on', showInfo);
         v.classList.toggle('with-info', showInfo);
         const d = toDate(p.created);
         const mp = p.width && p.height ? (p.width * p.height / 1e6).toFixed(1) : null;
         const row = (ic, label, value) => h('div', { class: 'ph-i-row' }, icon(ic, { size: 15 }), h('div', {}, h('div', { class: 'ph-i-label' }, label), h('div', { class: 'ph-i-value selectable' }, value)));
         clear(info,
-          h('div', { class: 'ph-i-head' }, h('div', { class: 'ph-i-title' }, '信息'), h('div', { class: 'ph-i-pos' }, `${idx + 1} / ${S.items.length}${S.hasMore ? '+' : ''}`)),
-          row('calendar', '日期', d ? `${fmt.date(d)} ${fmt.weekday(d)} ${fmt.time(d)}` : '—'),
-          row(p.type === 'movie' ? 'video' : p.live ? 'aperture' : 'image', '类型', kindLabel(p)),
-          row('file', '文件名', p.filename || '—'),
-          row('maximize-2', '尺寸', p.width && p.height ? `${p.width} × ${p.height}${mp ? ` · ${mp} MP` : ''}` : '—'),
-          row('hard-drive', '大小', p.size ? fmt.bytes(p.size) : '—'),
-          row('heart', '个人收藏', p.favorite ? '是' : '否'));
+          h('div', { class: 'ph-i-head' }, h('div', { class: 'ph-i-title' }, tx('信息', 'Info')), h('div', { class: 'ph-i-pos' }, `${idx + 1} / ${S.items.length}${S.hasMore ? '+' : ''}`)),
+          row('calendar', tx('日期', 'Date'), d ? `${fmt.date(d)} ${fmt.weekday(d)} ${fmt.time(d)}` : '—'),
+          row(p.type === 'movie' ? 'video' : p.live ? 'aperture' : 'image', tx('类型', 'Type'), kindLabel(p)),
+          row('file', tx('文件名', 'Filename'), p.filename || '—'),
+          row('maximize-2', tx('尺寸', 'Dimensions'), p.width && p.height ? `${p.width} × ${p.height}${mp ? ` · ${mp} MP` : ''}` : '—'),
+          row('hard-drive', tx('大小', 'Size'), p.size ? fmt.bytes(p.size) : '—'),
+          row('heart', tx('个人收藏', 'Favorite'), p.favorite ? tx('是', 'Yes') : tx('否', 'No')));
       }
 
       async function go(d) {

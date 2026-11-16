@@ -19,6 +19,7 @@ import re
 import uuid as uuidlib
 from dataclasses import dataclass, field
 
+from .i18n import tr
 from .notes_proto import (
     FONT_BOLD,
     FONT_ITALIC,
@@ -146,25 +147,25 @@ def _span(text: str, run: AttributeRun | None) -> Span:
 
 # ------------------------------------------------------------- markdown out
 _ATTACHMENT_LABELS = {
-    "com.apple.notes.table": "表格",
-    "com.apple.notes.gallery": "扫描文稿",
-    "com.apple.notes.inlinetextattachment.hashtag": "标签",
-    "com.apple.notes.inlinetextattachment.mention": "提及",
-    "com.apple.notes.inlinetextattachment.link": "备忘录链接",
+    "com.apple.notes.table": ("表格", "Table"),
+    "com.apple.notes.gallery": ("扫描文稿", "Scanned Document"),
+    "com.apple.notes.inlinetextattachment.hashtag": ("标签", "Tag"),
+    "com.apple.notes.inlinetextattachment.mention": ("提及", "Mention"),
+    "com.apple.notes.inlinetextattachment.link": ("备忘录链接", "Note Link"),
 }
 
 
 def attachment_label(uti: str | None) -> str:
     u = (uti or "").lower()
     if u in _ATTACHMENT_LABELS:
-        return _ATTACHMENT_LABELS[u]
+        return tr(*_ATTACHMENT_LABELS[u])
     if "drawing" in u or "paper" in u or "sketch" in u:
-        return "绘图"
+        return tr("绘图", "Drawing")
     if u.startswith("public.") and any(k in u for k in ("jpeg", "png", "heic", "image", "tiff", "gif")):
-        return "图片"
+        return tr("图片", "Image")
     if "url" in u:
-        return "链接"
-    return "附件"
+        return tr("链接", "Link")
+    return tr("附件", "Attachment")
 
 
 def _wrap(text: str, open_: str, close: str) -> str:
@@ -449,38 +450,46 @@ class EditCheck:
 
 
 def check_editable(doc: TTString) -> EditCheck:
+    att_word = tr("附件", "Attachment")
     kinds: list[str] = []
     for run in doc.runs:
         if run.attachment_info is not None:
             kinds.append(attachment_label(run.attachment_info.type_uti))
         elif run.has_field(15):
-            kinds.append("附件")
+            kinds.append(att_word)
     if OBJ in doc.string and not kinds:
-        kinds.append("附件")
+        kinds.append(att_word)
     if doc.attachments and not kinds:
-        kinds.append("附件")
+        kinds.append(att_word)
     warnings: list[str] = []
-    names = {3: "字体", 10: "文字颜色", 11: "书写方向", 14: "高亮"}
+    names = {
+        3: tr("字体", "custom font"),
+        10: tr("文字颜色", "text color"),
+        11: tr("书写方向", "writing direction"),
+        14: tr("高亮", "highlight"),
+    }
+    sup_label = tr("上标/下标", "superscript/subscript")
+    align_label = tr("对齐方式", "text alignment")
     seen: set[str] = set()
     for run in doc.runs:
         for num, label in names.items():
             if run.has_field(num) and label not in seen:
                 seen.add(label)
                 warnings.append(label)
-        if run.superscript and "上标/下标" not in seen:
-            seen.add("上标/下标")
-            warnings.append("上标/下标")
+        if run.superscript and sup_label not in seen:
+            seen.add(sup_label)
+            warnings.append(sup_label)
         ps = run.paragraph_style
-        if ps and (ps.alignment not in (None, 0, 4)) and "对齐方式" not in seen:
-            seen.add("对齐方式")
-            warnings.append("对齐方式")
+        if ps and (ps.alignment not in (None, 0, 4)) and align_label not in seen:
+            seen.add(align_label)
+            warnings.append(align_label)
     uniq = list(dict.fromkeys(kinds))
     if uniq:
-        return EditCheck(
-            False, "attachments",
+        blocker = tr(
             f"这条备忘录包含{'、'.join(uniq)}，网页接口无法保留，保存后这些内容会丢失",
-            uniq, warnings,
+            f"This note contains {', '.join(uniq)}, which the web API cannot preserve and would lose on save",
         )
+        return EditCheck(False, "attachments", blocker, uniq, warnings)
     return EditCheck(True, warnings=warnings)
 
 

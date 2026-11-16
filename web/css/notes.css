@@ -140,6 +140,7 @@
 .ne a { color: var(--nt-accent-strong); text-decoration: underline; text-underline-offset: 2px; }
 .ne s, .ne strike { text-decoration-thickness: 1px; }
 .ne.is-empty > .nb:first-child::before { content: "标题"; position: absolute; color: var(--text-4); pointer-events: none; }
+:lang(en) .ne.is-empty > .nb:first-child::before { content: "Title"; }
 .ne ::selection { background: rgba(255, 204, 0, .4); }
 :root[data-theme="dark"] .ne ::selection { background: rgba(255, 214, 10, .32); }
 

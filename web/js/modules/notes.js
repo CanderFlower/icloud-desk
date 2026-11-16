@@ -1,9 +1,10 @@
 // Notes — folder tree, date-grouped list and a block editor that round-trips the
 // backend's markdown dialect (see app/notes_text.py): one block per paragraph.
 import { get, cachedGet, peekCache, post, patch, del, enc } from '../api.js';
+import { countText, lang, MONTHS_EN, tx, WEEKDAYS_LONG_EN, WEEKDAYS_LONG_ZH } from '../i18n.js';
 import {
   h, clear, icon, iconBtn, btn, toolbar, searchBox, menu, toast, toastError, confirmDialog, promptDialog,
-  empty, skeleton, errorBox, toDate, store, copyText, download, shell,
+  empty, skeleton, errorBox, fmt, toDate, store, copyText, download, shell,
 } from '../ui.js';
 
 const TRASH = 'TrashFolder-CloudKit';
@@ -11,23 +12,23 @@ const ALL = '__all__';
 const LISTS = new Set(['ul', 'dash', 'ol', 'check']);
 const HEADINGS = new Set(['title', 'h2', 'h3']);
 const MAX_INDENT = 6;
-const FORMATS = [
-  { k: 'title', label: '标题', shortcut: 'Ctrl+Shift+T', cls: 'fm-title' },
-  { k: 'h2', label: '小标题', shortcut: 'Ctrl+Shift+H', cls: 'fm-h2' },
-  { k: 'h3', label: '副标题', shortcut: 'Ctrl+Shift+J', cls: 'fm-h3' },
-  { k: 'p', label: '正文', shortcut: 'Ctrl+Shift+B' },
-  { k: 'code', label: '等宽', cls: 'fm-code' },
+const formatsList = () => [
+  { k: 'title', label: tx('标题', 'Title'), shortcut: 'Ctrl+Shift+T', cls: 'fm-title' },
+  { k: 'h2', label: tx('小标题', 'Heading'), shortcut: 'Ctrl+Shift+H', cls: 'fm-h2' },
+  { k: 'h3', label: tx('副标题', 'Subheading'), shortcut: 'Ctrl+Shift+J', cls: 'fm-h3' },
+  { k: 'p', label: tx('正文', 'Body'), shortcut: 'Ctrl+Shift+B' },
+  { k: 'code', label: tx('等宽', 'Monospaced'), cls: 'fm-code' },
   '-',
-  { k: 'ul', label: '• 项目符号列表' },
-  { k: 'dash', label: '– 短横线列表' },
-  { k: 'ol', label: '1. 编号列表' },
-  { k: 'check', label: '清单', shortcut: 'Ctrl+Shift+L' },
+  { k: 'ul', label: tx('• 项目符号列表', '• Bulleted List') },
+  { k: 'dash', label: tx('– 短横线列表', '– Dashed List') },
+  { k: 'ol', label: tx('1. 编号列表', '1. Numbered List') },
+  { k: 'check', label: tx('清单', 'Checklist'), shortcut: 'Ctrl+Shift+L' },
 ];
 const KEY_FORMATS = { t: 'title', h: 'h2', j: 'h3', b: 'p', l: 'check' };
 const isSpecial = (id) => /^(DefaultFolder|TrashFolder)-CloudKit$/.test(id || '');
 const pad2 = (n) => String(n).padStart(2, '0');
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
-  .replace(/\uFFFC/g, '<span class="nt-obj" contenteditable="false">附件</span>');
+  .replace(/\uFFFC/g, `<span class="nt-obj" contenteditable="false">${tx('附件', 'Attachment')}</span>`);
 
 // ------------------------------------------------------------- markdown <-> blocks
 const INLINE = String.raw`\*\*\*(\S(?:.*?\S)?)\*\*\*|\*\*(\S(?:.*?\S)?)\*\*|(?<![\p{L}\p{N}_*])\*([^\s*](?:[^*]*?[^\s*])?)\*(?![\p{L}\p{N}_*])|~~(\S(?:.*?\S)?)~~|<u>(.+?)</u>|\[([^\]\n]+)\]\(([a-zA-Z][\w+.\-]*:[^)\s]+)\)`;
@@ -447,7 +448,7 @@ function createEditor({ onChange, onSelection } = {}) {
     const r = sel();
     const saved = r && ed.contains(r.startContainer) ? r.cloneRange() : null;
     const a = saved && (saved.startContainer.parentElement?.closest('a'));
-    let url = await promptDialog(a ? '编辑链接' : '添加链接', a?.getAttribute('href') || 'https://', { placeholder: 'https://example.com', okLabel: '好' });
+    let url = await promptDialog(a ? tx('编辑链接', 'Edit Link') : tx('添加链接', 'Add Link'), a?.getAttribute('href') || 'https://', { placeholder: 'https://example.com', okLabel: tx('好', 'OK') });
     if (url == null) return;
     url = url.trim();
     ed.focus();
@@ -677,33 +678,33 @@ function createEditor({ onChange, onSelection } = {}) {
 // ---------------------------------------------------------------- date helpers
 function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
 function dayDiff(d) { return Math.round((startOfDay(new Date()) - startOfDay(d)) / 864e5); }
-const WD = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
 function rowDate(d) {
   if (!d) return '';
   const n = dayDiff(d);
   if (n <= 0) return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-  if (n === 1) return '昨天';
-  if (n < 7) return WD[d.getDay()];
+  if (n === 1) return tx('昨天', 'Yesterday');
+  if (n < 7) return (lang.isEn ? WEEKDAYS_LONG_EN : WEEKDAYS_LONG_ZH)[d.getDay()];
   return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
 }
 function sectionOf(d) {
-  if (!d) return '更早';
+  if (!d) return tx('更早', 'Earlier');
   const n = dayDiff(d);
-  if (n <= 0) return '今天';
-  if (n === 1) return '昨天';
-  if (n < 7) return '过去 7 天';
-  if (n < 30) return '过去 30 天';
-  return d.getFullYear() === new Date().getFullYear() ? `${d.getMonth() + 1}月` : `${d.getFullYear()}年`;
+  if (n <= 0) return tx('今天', 'Today');
+  if (n === 1) return tx('昨天', 'Yesterday');
+  if (n < 7) return tx('过去 7 天', 'Previous 7 Days');
+  if (n < 30) return tx('过去 30 天', 'Previous 30 Days');
+  if (d.getFullYear() === new Date().getFullYear()) return lang.isEn ? MONTHS_EN[d.getMonth()] : `${d.getMonth() + 1}月`;
+  return lang.isEn ? String(d.getFullYear()) : `${d.getFullYear()}年`;
 }
 function longDate(d) {
   if (!d) return '';
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return fmt.datetime(d);
 }
 
 // ------------------------------------------------------------------------ module
 export default {
   id: 'notes',
-  title: '备忘录',
+  get title() { return tx('备忘录', 'Notes'); },
   app: 'notes',
   mount(el) {
     const S = {
@@ -726,20 +727,20 @@ export default {
     const listCount = h('div', { class: 'nt-count' });
     const detail = h('div', { class: 'pane detail nt-detail' });
     const listTb = toolbar({
-      title: '备忘录',
+      title: tx('备忘录', 'Notes'),
       cls: 'nt-list-tb',
       right: [
-        iconBtn('folder', '文件夹', (e) => folderMenu(e.currentTarget), { cls: 'when-side-hidden' }),
-        iconBtn('refresh-cw', '刷新 (F5)', () => refresh(), { cls: 'refresh hide-narrow' }),
-        h('button', { class: 'icon-btn nt-compose', type: 'button', 'data-tip': '新建备忘录 (Ctrl+N)', 'aria-label': '新建备忘录', dataset: { new: '' }, onclick: () => newNote() }, icon('square-pen')),
+        iconBtn('folder', tx('文件夹', 'Folders'), (e) => folderMenu(e.currentTarget), { cls: 'when-side-hidden' }),
+        iconBtn('refresh-cw', tx('刷新 (F5)', 'Refresh (F5)'), () => refresh(), { cls: 'refresh hide-narrow' }),
+        h('button', { class: 'icon-btn nt-compose', type: 'button', 'data-tip': tx('新建备忘录 (Ctrl+N)', 'New note (Ctrl+N)'), 'aria-label': tx('新建备忘录', 'New note'), dataset: { new: '' }, onclick: () => newNote() }, icon('square-pen')),
       ],
     });
     listTb.querySelector('.refresh').dataset.refresh = '';
-    const search = searchBox({ placeholder: '搜索', oninput: (q) => { S.query = q.toLowerCase(); renderList(); } });
+    const search = searchBox({ placeholder: tx('搜索', 'Search'), oninput: (q) => { S.query = q.toLowerCase(); renderList(); } });
     const panes = h('div', { class: 'panes collapse-side stack nt' },
       h('div', { class: 'pane side nt-side' },
         h('div', { class: 'pane-body' }, sideBody),
-        h('div', { class: 'pane-foot' }, btn('新建文件夹', { kind: 'ghost', size: 'sm', icon: 'folder-plus', onclick: () => newFolder() }))),
+        h('div', { class: 'pane-foot' }, btn(tx('新建文件夹', 'New Folder'), { kind: 'ghost', size: 'sm', icon: 'folder-plus', onclick: () => newFolder() }))),
       h('div', { class: 'pane list nt-listpane' }, listTb, h('div', { class: 'nt-search' }, search), listBody, h('div', { class: 'pane-foot nt-foot' }, listCount)),
       detail);
     el.append(panes);
@@ -748,7 +749,7 @@ export default {
     const folderById = (id) => S.folders.find((f) => f.id === id);
     const trash = () => folderById(TRASH);
     const defaultFolder = () => S.folders.find((f) => f.id.startsWith('DefaultFolder')) || S.folders.find((f) => f.id !== TRASH && !f.parent_id) || S.folders[0];
-    const folderName = (id) => (id === ALL ? '所有 iCloud 备忘录' : folderById(id)?.name || '备忘录');
+    const folderName = (id) => (id === ALL ? tx('所有 iCloud 备忘录', 'All iCloud') : folderById(id)?.name || tx('备忘录', 'Notes'));
 
     function tree() {
       const fs = S.folders.filter((f) => f.id !== TRASH);
@@ -759,7 +760,7 @@ export default {
         if (!kids.has(p)) kids.set(p, []);
         kids.get(p).push(f);
       }
-      const order = (a, b) => (b.id.startsWith('DefaultFolder') - a.id.startsWith('DefaultFolder')) || a.name.localeCompare(b.name, 'zh');
+      const order = (a, b) => (b.id.startsWith('DefaultFolder') - a.id.startsWith('DefaultFolder')) || a.name.localeCompare(b.name, lang.isEn ? 'en' : 'zh');
       const out = [];
       const walk = (p, depth) => {
         for (const f of (kids.get(p) || []).sort(order)) {
@@ -795,11 +796,11 @@ export default {
         },
       },
       has ? h('button', {
-        class: `nt-twisty ${S.collapsed.has(id) ? '' : 'open'}`, type: 'button', 'aria-label': '展开',
+        class: `nt-twisty ${S.collapsed.has(id) ? '' : 'open'}`, type: 'button', 'aria-label': tx('展开', 'Expand'),
         onclick: (e) => { e.stopPropagation(); toggleCollapse(id); },
       }, icon('chevron-right')) : (depth ? h('span', { class: 'nt-twisty-sp' }) : null),
       icon(ic), h('span', { class: 'label' }, name), h('span', { class: 'count' }, count ?? ''),
-      !special ? iconBtn('ellipsis', '更多', (e) => { e.stopPropagation(); folderCtx(e.currentTarget, id); }, { cls: 'more', size: 'sm' }) : null);
+      !special ? iconBtn('ellipsis', tx('更多', 'More'), (e) => { e.stopPropagation(); folderCtx(e.currentTarget, id); }, { cls: 'more', size: 'sm' }) : null);
       return item;
     }
 
@@ -807,11 +808,11 @@ export default {
       clear(sideBody);
       const total = S.folders.filter((f) => f.id !== TRASH).reduce((n, f) => n + (f.count || 0), 0);
       sideBody.append(
-        h('div', { class: 'side-title' }, 'iCloud', iconBtn('folder-plus', '新建文件夹', () => newFolder(), { size: 'sm' })),
-        sideItem({ id: ALL, name: '所有 iCloud 备忘录', ic: 'notebook-pen', count: total, special: true }),
+        h('div', { class: 'side-title' }, 'iCloud', iconBtn('folder-plus', tx('新建文件夹', 'New folder'), () => newFolder(), { size: 'sm' })),
+        sideItem({ id: ALL, name: tx('所有 iCloud 备忘录', 'All iCloud'), ic: 'notebook-pen', count: total, special: true }),
         ...tree().map(({ f, depth, has }) => sideItem({ id: f.id, name: f.name, ic: 'folder', count: f.count, depth, has, special: isSpecial(f.id) })),
       );
-      if (trash()) sideBody.append(sideItem({ id: TRASH, name: trash().name || '最近删除', ic: 'trash-2', count: trash().count, special: true }));
+      if (trash()) sideBody.append(sideItem({ id: TRASH, name: trash().name || tx('最近删除', 'Recently Deleted'), ic: 'trash-2', count: trash().count, special: true }));
     }
 
     function toggleCollapse(id) {
@@ -821,25 +822,25 @@ export default {
     }
 
     function folderMenu(at) {
-      const items = [{ label: '所有 iCloud 备忘录', icon: 'notebook-pen', checked: S.sel === ALL, onClick: () => selectFolder(ALL) }, '-'];
+      const items = [{ label: tx('所有 iCloud 备忘录', 'All iCloud'), icon: 'notebook-pen', checked: S.sel === ALL, onClick: () => selectFolder(ALL) }, '-'];
       for (const { f, depth } of tree()) items.push({ label: `${'\u2003'.repeat(depth)}${f.name}`, icon: 'folder', checked: S.sel === f.id, onClick: () => selectFolder(f.id) });
-      if (trash()) items.push('-', { label: trash().name || '最近删除', icon: 'trash-2', checked: S.sel === TRASH, onClick: () => selectFolder(TRASH) });
-      items.push('-', { label: '新建文件夹…', icon: 'folder-plus', onClick: () => newFolder() });
+      if (trash()) items.push('-', { label: trash().name || tx('最近删除', 'Recently Deleted'), icon: 'trash-2', checked: S.sel === TRASH, onClick: () => selectFolder(TRASH) });
+      items.push('-', { label: tx('新建文件夹…', 'New Folder…'), icon: 'folder-plus', onClick: () => newFolder() });
       menu(at, items, { align: 'end' });
     }
 
     function folderCtx(at, id) {
       if (id === TRASH) {
-        menu(at, [{ label: '清空“最近删除”…', icon: 'trash-2', danger: true, disabled: !S.notes.length || S.sel !== TRASH, onClick: () => emptyTrash() }]);
+        menu(at, [{ label: tx('清空“最近删除”…', 'Empty Recently Deleted…'), icon: 'trash-2', danger: true, disabled: !S.notes.length || S.sel !== TRASH, onClick: () => emptyTrash() }]);
         return;
       }
       const f = folderById(id);
       if (!f) return;
       menu(at, [
-        { label: '新建子文件夹…', icon: 'folder-plus', onClick: () => newFolder(id) },
-        { label: '重命名…', icon: 'pencil', onClick: () => renameFolder(f) },
+        { label: tx('新建子文件夹…', 'New Subfolder…'), icon: 'folder-plus', onClick: () => newFolder(id) },
+        { label: tx('重命名…', 'Rename…'), icon: 'pencil', onClick: () => renameFolder(f) },
         '-',
-        { label: '删除文件夹…', icon: 'trash-2', danger: true, onClick: () => deleteFolder(f) },
+        { label: tx('删除文件夹…', 'Delete Folder…'), icon: 'trash-2', danger: true, onClick: () => deleteFolder(f) },
       ]);
     }
 
@@ -861,7 +862,7 @@ export default {
     }
 
     async function newFolder(parentId = null) {
-      const title = await promptDialog(parentId ? '新建子文件夹' : '新建文件夹', '', { placeholder: '文件夹名称', okLabel: '创建' });
+      const title = await promptDialog(parentId ? tx('新建子文件夹', 'New Subfolder') : tx('新建文件夹', 'New Folder'), '', { placeholder: tx('文件夹名称', 'Folder name'), okLabel: tx('创建', 'Create') });
       if (!title?.trim()) return;
       try {
         const res = await post('/api/notes/folders', { title: title.trim(), parent_id: parentId || undefined });
@@ -869,12 +870,12 @@ export default {
         await loadFolders();
         const id = res?.id || S.folders.find((f) => f.name === title.trim())?.id;
         if (id) selectFolder(id);
-        toast('已创建文件夹', 'success', 1600);
+        toast(tx('已创建文件夹', 'Folder created'), 'success', 1600);
       } catch (e) { toastError(e); }
     }
 
     async function renameFolder(f) {
-      const title = await promptDialog('重命名文件夹', f.name, { okLabel: '重命名' });
+      const title = await promptDialog(tx('重命名文件夹', 'Rename Folder'), f.name, { okLabel: tx('重命名', 'Rename') });
       if (!title?.trim() || title.trim() === f.name) return;
       try {
         await patch(`/api/notes/folders/${enc(f.id)}`, { title: title.trim() });
@@ -885,9 +886,9 @@ export default {
     }
 
     async function deleteFolder(f) {
-      const ok = await confirmDialog(`删除文件夹“${f.name}”？`, {
-        title: '删除文件夹', okLabel: '删除', danger: true, icon: 'trash-2',
-        detail: '文件夹及其子文件夹会被删除，其中的备忘录会移到“最近删除”。',
+      const ok = await confirmDialog(tx(`删除文件夹“${f.name}”？`, `Delete folder “${f.name}”?`), {
+        title: tx('删除文件夹', 'Delete Folder'), okLabel: tx('删除', 'Delete'), danger: true, icon: 'trash-2',
+        detail: tx('文件夹及其子文件夹会被删除，其中的备忘录会移到“最近删除”。', 'The folder and its subfolders will be deleted, and its notes will move to Recently Deleted.'),
       });
       if (!ok) return;
       try {
@@ -896,18 +897,21 @@ export default {
         if (gone.has(S.sel)) S.sel = ALL;
         await loadFolders();
         await loadList();
-        toast(`已删除“${f.name}”`, 'success');
+        toast(tx(`已删除“${f.name}”`, `Deleted “${f.name}”`), 'success');
       } catch (e) { toastError(e); }
     }
 
     async function emptyTrash() {
-      const ok = await confirmDialog(`永久删除“最近删除”中的 ${S.notes.length} 条备忘录？`, { title: '清空最近删除', okLabel: '全部删除', danger: true, detail: '此操作无法撤销。' });
+      const ok = await confirmDialog(
+        tx(`永久删除“最近删除”中的 ${S.notes.length} 条备忘录？`, `Permanently delete ${countText(S.notes.length, '条备忘录', 'note')} in Recently Deleted?`),
+        { title: tx('清空最近删除', 'Empty Recently Deleted'), okLabel: tx('全部删除', 'Delete All'), danger: true, detail: tx('此操作无法撤销。', 'This action cannot be undone.') },
+      );
       if (!ok) return;
       let n = 0;
       for (const note of [...S.notes]) {
         try { await del(`/api/notes/item/${enc(note.id)}`, { permanent: true }); n++; } catch (e) { toastError(e); break; }
       }
-      toast(`已永久删除 ${n} 条备忘录`, 'success');
+      toast(tx(`已永久删除 ${n} 条备忘录`, `Permanently deleted ${countText(n, '条备忘录', 'note')}`), 'success');
       closeEditor();
       refreshCounts();
       loadList();
@@ -969,19 +973,25 @@ export default {
       if (S.listError) { listBody.append(errorBox(S.listError)); listCount.textContent = ''; return; }
       const rows = filtered();
       const draft = ED && !ED.id ? ED : null;
-      listCount.textContent = S.notes.length ? `${S.notes.length} 个备忘录` : '';
-      if (S.sel === TRASH && S.notes.length) listBody.append(h('div', { class: 'nt-trash-hint' }, '“最近删除”中的备忘录会在一段时间后被永久删除。'));
+      listCount.textContent = S.notes.length ? countText(S.notes.length, '个备忘录', 'note') : '';
+      if (S.sel === TRASH && S.notes.length) listBody.append(h('div', { class: 'nt-trash-hint' }, tx('“最近删除”中的备忘录会在一段时间后被永久删除。', 'Notes in Recently Deleted are permanently deleted after 30 days.')));
       if (!rows.length && !draft) {
         listBody.append(S.query
-          ? empty({ icon: 'search', title: '无结果', text: `没有与“${S.query}”匹配的备忘录`, compact: true })
-          : empty({ icon: S.sel === TRASH ? 'trash-2' : 'sticky-note', title: S.sel === TRASH ? '没有最近删除的备忘录' : '没有备忘录', text: S.sel === TRASH ? '' : '点按右上角的新建按钮写下第一条备忘录。', compact: true }));
+          ? empty({ icon: 'search', title: tx('无结果', 'No Results'), text: tx(`没有与“${S.query}”匹配的备忘录`, `No notes matching “${S.query}”`), compact: true })
+          : empty({
+            icon: S.sel === TRASH ? 'trash-2' : 'sticky-note',
+            title: S.sel === TRASH ? tx('没有最近删除的备忘录', 'No Recently Deleted Notes') : tx('没有备忘录', 'No Notes'),
+            text: S.sel === TRASH ? '' : tx('点按右上角的新建按钮写下第一条备忘录。', 'Click the compose button above to write your first note.'),
+            compact: true,
+          }));
         return;
       }
-      if (draft) listBody.append(h('div', { class: 'nt-sec' }, '今天'), noteRow({ id: null, title: draft.editor.title() || '新备忘录', snippet: draft.editor.snippet() || '无附加文本', modified_at: Date.now() }, true));
-      let sec = draft ? '今天' : null;
+      const todayLabel = tx('今天', 'Today');
+      if (draft) listBody.append(h('div', { class: 'nt-sec' }, todayLabel), noteRow({ id: null, title: draft.editor.title() || tx('新备忘录', 'New Note'), snippet: draft.editor.snippet() || tx('无附加文本', 'No additional text'), modified_at: Date.now() }, true));
+      let sec = draft ? todayLabel : null;
       for (const n of rows) {
         const d = toDate(n.modified_at);
-        const s = S.query ? '搜索结果' : sectionOf(d);
+        const s = S.query ? tx('搜索结果', 'Search Results') : sectionOf(d);
         if (s !== sec) { listBody.append(h('div', { class: 'nt-sec' }, s)); sec = s; }
         listBody.append(noteRow(n, n.id === S.curId && !draft));
       }
@@ -997,8 +1007,8 @@ export default {
         ondragstart: (e) => { e.dataTransfer.setData('application/x-icd-note', n.id); e.dataTransfer.effectAllowed = 'move'; row.classList.add('dragging'); },
         ondragend: () => row.classList.remove('dragging'),
       },
-      h('div', { class: 'nt-row-title' }, n.is_locked ? icon('lock') : null, h('span', {}, n.title || '新备忘录')),
-      h('div', { class: 'nt-row-sub' }, h('span', { class: 'nt-row-date' }, rowDate(d)), h('span', { class: 'nt-row-snip' }, n.is_locked ? '已锁定' : (n.snippet || '无附加文本'))),
+      h('div', { class: 'nt-row-title' }, n.is_locked ? icon('lock') : null, h('span', {}, n.title || tx('新备忘录', 'New Note'))),
+      h('div', { class: 'nt-row-sub' }, h('span', { class: 'nt-row-date' }, rowDate(d)), h('span', { class: 'nt-row-snip' }, n.is_locked ? tx('已锁定', 'Locked') : (n.snippet || tx('无附加文本', 'No additional text')))),
       S.sel === ALL && n.folder_name ? h('div', { class: 'nt-row-folder' }, icon('folder'), n.folder_name) : null);
       return row;
     }
@@ -1010,14 +1020,15 @@ export default {
     function noteCtx(e, n) {
       const inTrash = n.folder_id === TRASH || S.sel === TRASH;
       const targets = tree().filter(({ f }) => f.id !== n.folder_id);
+      const defName = defaultFolder()?.name || tx('备忘录', 'Notes');
       menu(e, [
         inTrash
-          ? { label: '恢复到“' + (defaultFolder()?.name || '备忘录') + '”', icon: 'archive-restore', onClick: () => moveNote(n.id, defaultFolder()?.id) }
-          : { label: '移到…', icon: 'folder-input', disabled: !targets.length, onClick: () => moveMenu(e, n) },
-        { label: '复制文本', icon: 'copy', disabled: n.is_locked, onClick: () => copyNote(n.id) },
-        { label: '导出为 Markdown', icon: 'file-down', disabled: n.is_locked, onClick: () => exportNote(n.id) },
+          ? { label: tx(`恢复到“${defName}”`, `Recover to “${defName}”`), icon: 'archive-restore', onClick: () => moveNote(n.id, defaultFolder()?.id) }
+          : { label: tx('移到…', 'Move to…'), icon: 'folder-input', disabled: !targets.length, onClick: () => moveMenu(e, n) },
+        { label: tx('复制文本', 'Copy Text'), icon: 'copy', disabled: n.is_locked, onClick: () => copyNote(n.id) },
+        { label: tx('导出为 Markdown', 'Export as Markdown'), icon: 'file-down', disabled: n.is_locked, onClick: () => exportNote(n.id) },
         '-',
-        { label: inTrash ? '永久删除' : '删除', icon: 'trash-2', danger: true, onClick: () => deleteNote(n.id) },
+        { label: inTrash ? tx('永久删除', 'Delete Immediately') : tx('删除', 'Delete'), icon: 'trash-2', danger: true, onClick: () => deleteNote(n.id) },
       ]);
     }
 
@@ -1026,7 +1037,7 @@ export default {
         label: `${'\u2003'.repeat(depth)}${f.name}`, icon: 'folder', checked: f.id === n.folder_id, disabled: f.id === n.folder_id,
         onClick: () => moveNote(n.id, f.id),
       }));
-      setTimeout(() => menu(at, [{ section: '移到文件夹' }, ...items]), 0);
+      setTimeout(() => menu(at, [{ section: tx('移到文件夹', 'Move to Folder') }, ...items]), 0);
     }
 
     // ---- notes CRUD
@@ -1035,11 +1046,11 @@ export default {
       const n = await get(`/api/notes/item/${enc(id)}`);
       return n.markdown ?? n.text ?? '';
     }
-    async function copyNote(id) { try { copyText(await noteText(id), '已复制备忘录文本'); } catch (e) { toastError(e); } }
+    async function copyNote(id) { try { copyText(await noteText(id), tx('已复制备忘录文本', 'Note text copied')); } catch (e) { toastError(e); } }
     async function exportNote(id) {
       try {
         const md = await noteText(id);
-        const name = (S.notes.find((n) => n.id === id)?.title || '备忘录').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80);
+        const name = (S.notes.find((n) => n.id === id)?.title || tx('备忘录', 'Note')).replace(/[\\/:*?"<>|]/g, '_').slice(0, 80);
         const url = URL.createObjectURL(new Blob([md], { type: 'text/markdown;charset=utf-8' }));
         const a = h('a', { href: url, download: `${name}.md` });
         document.body.append(a);
@@ -1065,8 +1076,8 @@ export default {
         } else if (ED?.id === id) { ED.folder_id = folderId; renderNoteChrome(); }
         renderList();
         refreshCounts();
-        toast(folderId === TRASH ? '已移到“最近删除”' : `已移到“${name}”`, 'success', from && from !== TRASH ? {
-          ms: 4200, action: { label: '撤销', onClick: () => moveNote(id, from).then(() => loadList({ keep: true })) },
+        toast(folderId === TRASH ? tx('已移到“最近删除”', 'Moved to Recently Deleted') : tx(`已移到“${name}”`, `Moved to “${name}”`), 'success', from && from !== TRASH ? {
+          ms: 4200, action: { label: tx('撤销', 'Undo'), onClick: () => moveNote(id, from).then(() => loadList({ keep: true })) },
         } : 1800);
       } catch (e) { toastError(e); }
     }
@@ -1081,7 +1092,9 @@ export default {
       const n = S.notes.find((x) => x.id === id);
       const inTrash = n?.folder_id === TRASH || S.sel === TRASH;
       if (inTrash) {
-        const ok = await confirmDialog(`永久删除“${n?.title || '这条备忘录'}”？`, { title: '永久删除', okLabel: '删除', danger: true, detail: '此操作无法撤销。' });
+        const ok = await confirmDialog(tx(`永久删除“${n?.title || '这条备忘录'}”？`, `Permanently delete “${n?.title || 'this note'}”?`), {
+          title: tx('永久删除', 'Delete Note'), okLabel: tx('删除', 'Delete'), danger: true, detail: tx('此操作无法撤销。', 'This action cannot be undone.'),
+        });
         if (!ok) return;
       }
       const from = n?.folder_id;
@@ -1099,8 +1112,8 @@ export default {
       }
       renderList();
       refreshCounts();
-      if (inTrash) toast('已永久删除', 'success', 1600);
-      else toast('已移到“最近删除”', 'success', from ? { ms: 4200, action: { label: '撤销', onClick: () => restoreTo(id, from) } } : 1800);
+      if (inTrash) toast(tx('已永久删除', 'Permanently deleted'), 'success', 1600);
+      else toast(tx('已移到“最近删除”', 'Moved to Recently Deleted'), 'success', from ? { ms: 4200, action: { label: tx('撤销', 'Undo'), onClick: () => restoreTo(id, from) } } : 1800);
     }
 
     async function restoreTo(id, folderId) {
@@ -1117,33 +1130,33 @@ export default {
     function edToolbar() {
       const b = (key, ic, tip, fn) => { const x = iconBtn(ic, tip, fn); tbRefs[key] = x; return x; };
       return h('div', { class: 'toolbar nt-ed-tb' },
-        iconBtn('chevron-left', '返回', () => { flush(); panes.classList.remove('show-detail'); }, { cls: 'only-narrow nt-back' }),
+        iconBtn('chevron-left', tx('返回', 'Back'), () => { flush(); panes.classList.remove('show-detail'); }, { cls: 'only-narrow nt-back' }),
         tbRefs.status = h('div', { class: 'nt-status' }),
         h('div', { class: 'tools' },
           h('div', { class: 'nt-fmt' },
-            tbRefs.aa = h('button', { class: 'icon-btn nt-aa', type: 'button', 'data-tip': '格式', onclick: (e) => formatMenu(e.currentTarget) }, h('span', {}, 'Aa')),
-            b('check', 'list-checks', '清单 (Ctrl+Shift+L)', () => ED?.editor.setKind('check')),
+            tbRefs.aa = h('button', { class: 'icon-btn nt-aa', type: 'button', 'data-tip': tx('格式', 'Format'), onclick: (e) => formatMenu(e.currentTarget) }, h('span', {}, 'Aa')),
+            b('check', 'list-checks', tx('清单 (Ctrl+Shift+L)', 'Checklist (Ctrl+Shift+L)'), () => ED?.editor.setKind('check')),
             h('span', { class: 'nt-tb-sep hide-narrow' }),
             h('span', { class: 'nt-inline hide-narrow' },
-              b('bold', 'bold', '粗体 (Ctrl+B)', () => ED?.editor.inline('bold')),
-              b('italic', 'italic', '斜体 (Ctrl+I)', () => ED?.editor.inline('italic')),
-              b('underline', 'underline', '下划线 (Ctrl+U)', () => ED?.editor.inline('underline')),
-              b('strike', 'strikethrough', '删除线 (Ctrl+Shift+X)', () => ED?.editor.inline('strikeThrough'))),
-            b('link', 'link', '链接 (Ctrl+K)', () => ED?.editor.insertLink()),
+              b('bold', 'bold', tx('粗体 (Ctrl+B)', 'Bold (Ctrl+B)'), () => ED?.editor.inline('bold')),
+              b('italic', 'italic', tx('斜体 (Ctrl+I)', 'Italic (Ctrl+I)'), () => ED?.editor.inline('italic')),
+              b('underline', 'underline', tx('下划线 (Ctrl+U)', 'Underline (Ctrl+U)'), () => ED?.editor.inline('underline')),
+              b('strike', 'strikethrough', tx('删除线 (Ctrl+Shift+X)', 'Strikethrough (Ctrl+Shift+X)'), () => ED?.editor.inline('strikeThrough'))),
+            b('link', 'link', tx('链接 (Ctrl+K)', 'Link (Ctrl+K)'), () => ED?.editor.insertLink()),
             h('span', { class: 'nt-tb-sep' })),
-          b('more', 'ellipsis', '更多', (e) => moreMenu(e.currentTarget)),
-          b('del', 'trash-2', '删除', () => deleteNote(ED?.id ?? null))));
+          b('more', 'ellipsis', tx('更多', 'More'), (e) => moreMenu(e.currentTarget)),
+          b('del', 'trash-2', tx('删除', 'Delete'), () => deleteNote(ED?.id ?? null))));
     }
 
     function formatMenu(at) {
       if (!ED?.editor) return;
       const cur = ED.editor.currentKind();
       menu(at, [
-        ...FORMATS.map((f) => (f === '-' ? '-' : { label: f.label, checked: cur === f.k, shortcut: f.shortcut, onClick: () => ED.editor.setKind(f.k) })),
+        ...formatsList().map((f) => (f === '-' ? '-' : { label: f.label, checked: cur === f.k, shortcut: f.shortcut, onClick: () => ED.editor.setKind(f.k) })),
         '-',
-        { label: '引用', icon: 'message-square-text', onClick: () => ED.editor.toggleQuote() },
-        { label: '增加缩进', shortcut: 'Tab', onClick: () => ED.editor.indent(1) },
-        { label: '减少缩进', shortcut: 'Shift+Tab', onClick: () => ED.editor.indent(-1) },
+        { label: tx('引用', 'Block Quote'), icon: 'message-square-text', onClick: () => ED.editor.toggleQuote() },
+        { label: tx('增加缩进', 'Increase Indent'), shortcut: 'Tab', onClick: () => ED.editor.indent(1) },
+        { label: tx('减少缩进', 'Decrease Indent'), shortcut: 'Shift+Tab', onClick: () => ED.editor.indent(-1) },
       ]);
     }
 
@@ -1152,28 +1165,28 @@ export default {
       const n = S.notes.find((x) => x.id === ED.id);
       const inTrash = ED.folder_id === TRASH;
       menu(at, [
-        { label: '移到…', icon: 'folder-input', disabled: !ED.id || inTrash, onClick: () => moveMenu(at, n || { id: ED.id, folder_id: ED.folder_id }) },
-        inTrash ? { label: '恢复', icon: 'archive-restore', onClick: () => moveNote(ED.id, defaultFolder()?.id) } : null,
+        { label: tx('移到…', 'Move to…'), icon: 'folder-input', disabled: !ED.id || inTrash, onClick: () => moveMenu(at, n || { id: ED.id, folder_id: ED.folder_id }) },
+        inTrash ? { label: tx('恢复', 'Recover'), icon: 'archive-restore', onClick: () => moveNote(ED.id, defaultFolder()?.id) } : null,
         '-',
-        { label: '复制文本', icon: 'copy', disabled: !ED.editor, onClick: () => copyText(ED.editor.toMarkdown(), '已复制备忘录文本') },
-        { label: '导出为 Markdown', icon: 'file-down', disabled: !ED.id || !ED.editor, onClick: () => exportNote(ED.id) },
+        { label: tx('复制文本', 'Copy Text'), icon: 'copy', disabled: !ED.editor, onClick: () => copyText(ED.editor.toMarkdown(), tx('已复制备忘录文本', 'Note text copied')) },
+        { label: tx('导出为 Markdown', 'Export as Markdown'), icon: 'file-down', disabled: !ED.id || !ED.editor, onClick: () => exportNote(ED.id) },
         '-',
-        { label: '撤销', icon: 'undo-2', shortcut: 'Ctrl+Z', disabled: ED.readonly || !ED.editor, onClick: () => ED.editor.undo() },
-        { label: '重做', icon: 'redo-2', shortcut: 'Ctrl+Y', disabled: ED.readonly || !ED.editor, onClick: () => ED.editor.redo() },
+        { label: tx('撤销', 'Undo'), icon: 'undo-2', shortcut: 'Ctrl+Z', disabled: ED.readonly || !ED.editor, onClick: () => ED.editor.undo() },
+        { label: tx('重做', 'Redo'), icon: 'redo-2', shortcut: 'Ctrl+Y', disabled: ED.readonly || !ED.editor, onClick: () => ED.editor.redo() },
         '-',
-        { label: '重新载入', icon: 'refresh-cw', disabled: !ED.id, onClick: async () => { await flush(); openNote(ED.id, { force: true }); } },
+        { label: tx('重新载入', 'Reload'), icon: 'refresh-cw', disabled: !ED.id, onClick: async () => { await flush(); openNote(ED.id, { force: true }); } },
       ]);
     }
 
     function setStatus(kind, msg) {
       if (!tbRefs.status) return;
       const map = {
-        saved: ['circle-check', '已保存', ''],
-        saving: ['loader', '正在保存…', 'busy'],
-        edit: ['pencil', '未保存', 'dim'],
-        error: ['circle-alert', '保存失败，点按重试', 'err'],
-        readonly: ['lock', '只读', 'dim'],
-        new: ['square-pen', '新备忘录', 'dim'],
+        saved: ['circle-check', tx('已保存', 'Saved'), ''],
+        saving: ['loader', tx('正在保存…', 'Saving…'), 'busy'],
+        edit: ['pencil', tx('未保存', 'Edited'), 'dim'],
+        error: ['circle-alert', tx('保存失败，点按重试', 'Save failed — click to retry'), 'err'],
+        readonly: ['lock', tx('只读', 'Read-only'), 'dim'],
+        new: ['square-pen', tx('新备忘录', 'New Note'), 'dim'],
         none: [null, '', ''],
       };
       const [ic, label, cls] = map[kind] || map.none;
@@ -1192,8 +1205,12 @@ export default {
       markActive();
       clear(detail);
       detail.append(edToolbar(), h('div', { class: 'pane-body nt-blank' },
-        empty({ app: 'notes', title: S.notes.length ? '未选择备忘录' : '备忘录', text: '从列表中选择一条备忘录，或新建一条。' }),
-        h('div', { class: 'nt-blank-act' }, btn('新建备忘录', { kind: 'tinted', icon: 'square-pen', onclick: () => newNote() }))));
+        empty({
+          app: 'notes',
+          title: S.notes.length ? tx('未选择备忘录', 'No Note Selected') : tx('备忘录', 'Notes'),
+          text: tx('从列表中选择一条备忘录，或新建一条。', 'Select a note from the list, or create a new one.'),
+        }),
+        h('div', { class: 'nt-blank-act' }, btn(tx('新建备忘录', 'New Note'), { kind: 'tinted', icon: 'square-pen', onclick: () => newNote() }))));
       setStatus('none');
       setToolsEnabled(false);
       panes.classList.remove('show-detail');
@@ -1217,30 +1234,35 @@ export default {
       clear(bannerBox);
       const n = ED.note || {};
       if (ED.folder_id === TRASH) {
-        bannerBox.append(banner('info', 'trash-2', '这条备忘录在“最近删除”中。要编辑，请先恢复。', [
-          btn('恢复', { kind: 'tinted', size: 'sm', onclick: () => moveNote(ED.id, defaultFolder()?.id).then(() => ED && openNote(ED.id, { force: true })) }),
+        bannerBox.append(banner('info', 'trash-2', tx('这条备忘录在“最近删除”中。要编辑，请先恢复。', 'This note is in Recently Deleted. Recover it first to edit.'), [
+          btn(tx('恢复', 'Recover'), { kind: 'tinted', size: 'sm', onclick: () => moveNote(ED.id, defaultFolder()?.id).then(() => ED && openNote(ED.id, { force: true })) }),
         ]));
       } else if (ED.conflict) {
-        bannerBox.append(banner('warn', 'triangle-alert', '这条备忘录已在其他设备上修改。', [
-          btn('重新载入', { size: 'sm', onclick: () => { ED.dirty = false; ED.readonly = true; openNote(ED.id, { force: true }); } }),
-          btn('保留我的版本', { kind: 'tinted', size: 'sm', onclick: () => { ED.conflict = false; ED.change_tag = null; renderNoteChrome(); save(ED); } }),
+        bannerBox.append(banner('warn', 'triangle-alert', tx('这条备忘录已在其他设备上修改。', 'This note was modified on another device.'), [
+          btn(tx('重新载入', 'Reload'), { size: 'sm', onclick: () => { ED.dirty = false; ED.readonly = true; openNote(ED.id, { force: true }); } }),
+          btn(tx('保留我的版本', 'Keep Mine'), { kind: 'tinted', size: 'sm', onclick: () => { ED.conflict = false; ED.change_tag = null; renderNoteChrome(); save(ED); } }),
         ]));
       } else if (ED.blocked && !ED.force) {
         const att = n.edit_blocker_code === 'attachments';
         bannerBox.append(banner(att ? 'warn' : 'info', att ? 'paperclip' : 'lock',
-          att ? '这条备忘录包含附件（图片、扫描件、表格等）。网页接口编辑后会覆盖正文，附件可能丢失。' : (n.edit_blocker || '这条备忘录包含无法在此编辑的内容，暂时只读。'),
-          att ? [btn('仍然编辑', { size: 'sm', onclick: () => enableForce() })] : []));
+          att
+            ? tx('这条备忘录包含附件（图片、扫描件、表格等）。网页接口编辑后会覆盖正文，附件可能丢失。', 'This note contains attachments (images, scans, tables, etc.). Editing via the web API overwrites the body and may drop attachments.')
+            : (n.edit_blocker || tx('这条备忘录包含无法在此编辑的内容，暂时只读。', 'This note contains content that cannot be edited here and is read-only.')),
+          att ? [btn(tx('仍然编辑', 'Edit Anyway'), { size: 'sm', onclick: () => enableForce() })] : []));
       } else if (ED.force) {
-        bannerBox.append(banner('warn', 'triangle-alert', '正在编辑含附件的备忘录：保存后附件可能会丢失。'));
+        bannerBox.append(banner('warn', 'triangle-alert', tx('正在编辑含附件的备忘录：保存后附件可能会丢失。', 'Editing a note with attachments: saving may remove its attachments.')));
       }
       for (const w of (!ED.blocked && n.edit_warnings) || []) bannerBox.append(banner('info', 'info', w));
       if (dateLine) dateLine.textContent = ED.id ? longDate(toDate(ED.note?.modified_at) || new Date()) : longDate(new Date());
     }
 
     async function enableForce() {
-      const ok = await confirmDialog('仍要编辑这条含附件的备忘录？', {
-        title: '编辑含附件的备忘录', okLabel: '仍然编辑', danger: true,
-        detail: '通过网页接口保存时会重写正文，图片、扫描件、绘图等附件可能会被移除。建议先在 Apple 设备上备份。',
+      const ok = await confirmDialog(tx('仍要编辑这条含附件的备忘录？', 'Edit this note with attachments anyway?'), {
+        title: tx('编辑含附件的备忘录', 'Edit Note with Attachments'), okLabel: tx('仍然编辑', 'Edit Anyway'), danger: true,
+        detail: tx(
+          '通过网页接口保存时会重写正文，图片、扫描件、绘图等附件可能会被移除。建议先在 Apple 设备上备份。',
+          'Saving via the web API rewrites the note body and may remove images, scans, drawings, or tables. Back up on an Apple device first.',
+        ),
       });
       if (!ok || !ED) return;
       ED.force = true;
@@ -1268,11 +1290,11 @@ export default {
       bannerBox = h('div', { class: 'nt-banners' });
       dateLine = h('div', { class: 'nt-date' });
       const atts = (note.attachments || []).length ? h('div', { class: 'nt-atts' },
-        h('div', { class: 'nt-atts-title' }, icon('paperclip'), `附件 · ${note.attachments.length}`),
+        h('div', { class: 'nt-atts-title' }, icon('paperclip'), `${tx('附件', 'Attachments')} · ${note.attachments.length}`),
         h('div', { class: 'nt-atts-grid' }, note.attachments.map((a) => h('button', {
-          class: 'nt-att', type: 'button', title: '下载',
+          class: 'nt-att', type: 'button', title: tx('下载', 'Download'),
           onclick: () => download(`/api/notes/attachment/${enc(note.id)}?att_id=${encodeURIComponent(a.id)}`),
-        }, h('span', { class: 'nt-att-ic' }, icon(attIcon(a))), h('span', { class: 'nt-att-name' }, a.filename || a.uti || '附件'),
+        }, h('span', { class: 'nt-att-ic' }, icon(attIcon(a))), h('span', { class: 'nt-att-name' }, a.filename || a.uti || tx('附件', 'Attachment')),
         a.size ? h('span', { class: 'nt-att-size' }, fmtBytes(a.size)) : null, icon('download'))))) : null;
       const page = h('div', { class: 'nt-page' }, dateLine, editor.el, atts);
       const scroller = h('div', { class: 'pane-body nt-scroll', onmousedown: (e) => {
@@ -1356,8 +1378,8 @@ export default {
       clear(detail);
       detail.append(edToolbar(), h('div', { class: 'pane-body nt-locked' },
         h('div', { class: 'nt-lock-ic' }, icon('lock')),
-        h('div', { class: 'nt-lock-title' }, '此备忘录已锁定'),
-        h('div', { class: 'nt-lock-text' }, 'iCloud 网页接口无法解锁加密备忘录。请在 iPhone、iPad 或 Mac 上用备忘录密码打开。')));
+        h('div', { class: 'nt-lock-title' }, tx('此备忘录已锁定', 'This Note Is Locked')),
+        h('div', { class: 'nt-lock-text' }, tx('iCloud 网页接口无法解锁加密备忘录。请在 iPhone、iPad 或 Mac 上用备忘录密码打开。', 'Encrypted notes cannot be unlocked via the iCloud web API. Open this note on your iPhone, iPad, or Mac.'))));
       setToolsEnabled(false, { canDelete: true });
       setStatus('readonly');
     }
@@ -1386,8 +1408,8 @@ export default {
       ED.timer = setTimeout(() => save(target), 900);
       const row = listBody.querySelector(ED.id ? `.nt-row[data-id="${CSS.escape(ED.id)}"]` : '.nt-row[data-id=""]');
       if (row) {
-        row.querySelector('.nt-row-title span').textContent = ED.editor.title() || '新备忘录';
-        row.querySelector('.nt-row-snip').textContent = ED.editor.snippet() || '无附加文本';
+        row.querySelector('.nt-row-title span').textContent = ED.editor.title() || tx('新备忘录', 'New Note');
+        row.querySelector('.nt-row-snip').textContent = ED.editor.snippet() || tx('无附加文本', 'No additional text');
       }
     }
 
@@ -1417,7 +1439,7 @@ export default {
             if (dateLine) dateLine.textContent = longDate(new Date());
           }
         } catch (e) {
-          if (e.status === 409 && /其他设备/.test(e.message)) { ed.conflict = true; if (ed === ED) { renderNoteChrome(); setStatus('edit'); } }
+          if (e.status === 409 && /其他设备|another device/i.test(e.message)) { ed.conflict = true; if (ed === ED) { renderNoteChrome(); setStatus('edit'); } }
           else if (ed === ED) { setStatus('error', e.message); toastError(e); }
           else toastError(e);
           ed.again = false;

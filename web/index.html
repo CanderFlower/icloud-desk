@@ -13,6 +13,10 @@
       try { pref = JSON.parse(localStorage.getItem('icd.theme')) || 'system'; } catch (e) {}
       var dark = pref === 'dark' || (pref === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
       document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      var lp = 'system';
+      try { lp = JSON.parse(localStorage.getItem('icd.lang')) || 'system'; } catch (e) {}
+      var lc = lp === 'en' ? 'en' : lp === 'zh-CN' ? 'zh-CN' : /^zh/i.test(navigator.language || '') ? 'zh-CN' : 'en';
+      document.documentElement.lang = lc;
       // iCloudDesk.exe draws its own title bar in the sidebar colour; the main area becomes an inset card.
       if (window.__ICD_SHELL__ && window.__ICD_SHELL__.chrome === 'custom') document.documentElement.classList.add('shell-chrome');
     })();

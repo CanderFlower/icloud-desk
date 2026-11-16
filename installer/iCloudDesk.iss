@@ -2,12 +2,12 @@
 ;
 ; Built by scripts\build.ps1, which stages the core (icd.exe + _internal\) and the shell
 ; (iCloudDesk.exe) into build\stage and then runs:
-;   ISCC.exe /DAppVersion=0.2.0 /DStageDir=..\build\stage /DOutputDir=..\dist installer\iCloudDesk.iss
+;   ISCC.exe /DAppVersion=0.3.0 /DStageDir=..\build\stage /DOutputDir=..\dist installer\iCloudDesk.iss
 ;
 ; Per-user install (no UAC prompt): {localappdata}\Programs\iCloud Desk.
 
 #ifndef AppVersion
-  #define AppVersion "0.2.0"
+  #define AppVersion "0.3.0"
 #endif
 #ifndef StageDir
   #define StageDir "..\build\stage"

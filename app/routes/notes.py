@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from ..i18n import tr
 from ..notes_write import NotesWriter
 from .common import dump, run
 
@@ -79,9 +80,9 @@ def note(note_id: str):
         except Exception as exc:  # NoteLockedError / NoteNotFound
             name = type(exc).__name__
             if "Locked" in name:
-                raise HTTPException(423, "这条备忘录已加锁，无法通过网页接口读取") from exc
+                raise HTTPException(423, tr("这条备忘录已加锁，无法通过网页接口读取", "This note is locked and cannot be read via the web API")) from exc
             if "NotFound" in name:
-                raise HTTPException(404, "备忘录不存在") from exc
+                raise HTTPException(404, tr("备忘录不存在", "Note not found")) from exc
             raise
         data = dump(n)
         try:
@@ -96,7 +97,7 @@ def note(note_id: str):
             data.update({
                 "markdown": None,
                 "editable": False,
-                "edit_blocker": f"无法检查这条备忘录是否可编辑：{exc}",
+                "edit_blocker": tr(f"无法检查这条备忘录是否可编辑：{exc}", f"Could not check whether this note is editable: {exc}"),
                 "edit_blocker_code": "unknown",
                 "edit_warnings": [],
                 "change_tag": None,
@@ -165,7 +166,7 @@ def attachment(note_id: str, att_id: str):
         for att in n.attachments or []:
             if att.id == att_id:
                 return att, api.notes.stream_attachment(att)
-        raise HTTPException(404, "附件不存在")
+        raise HTTPException(404, tr("附件不存在", "Attachment not found"))
 
     att, stream = run(_do)
     filename = att.filename or "attachment"

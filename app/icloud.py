@@ -28,6 +28,7 @@ from pyicloud.utils import (
 )
 
 from .config import SESSION_DIR, load_settings, save_settings
+from .i18n import tr
 
 log = logging.getLogger("icloud-desk")
 T = TypeVar("T")
@@ -35,13 +36,26 @@ T = TypeVar("T")
 AUTH_ERROR_CODES = {401, 421, 450, "401", "421", "450"}
 
 
+def _pick_msg(msg: str | tuple[str, str] | None) -> str | None:
+    if isinstance(msg, tuple):
+        return tr(msg[0], msg[1])
+    return msg
+
+
 class NotLoggedIn(Exception):
     """Raised when an endpoint needs a session but none is available."""
 
-    def __init__(self, state: str, message: str = "未登录") -> None:
-        super().__init__(message)
+    def __init__(self, state: str, message: str | tuple[str, str] | None = None) -> None:
+        resolved = _pick_msg(message) if message is not None else tr("未登录", "Not signed in")
+        super().__init__(resolved)
         self.state = state
-        self.message = message
+        self.raw_message = message
+        self.message = resolved or ""
+
+    def localized_message(self) -> str:
+        if self.raw_message is not None:
+            return _pick_msg(self.raw_message) or ""
+        return tr("未登录", "Not signed in")
 
 
 class ICloudManager:
@@ -50,7 +64,7 @@ class ICloudManager:
         self.api: PyiCloudService | None = None
         # logged_out | restoring | needs_2fa | ready
         self.state = "logged_out"
-        self.message: str | None = None
+        self.message: str | tuple[str, str] | None = None
         self.two_fa: dict[str, Any] = {}
         self.cache: dict[str, Any] = {}
 
@@ -58,13 +72,18 @@ class ICloudManager:
     def status(self) -> dict[str, Any]:
         settings = load_settings()
         apple_id = settings.get("apple_id")
+        two_fa = None
+        if self.state == "needs_2fa":
+            two_fa = dict(self.two_fa)
+            if "notice" in two_fa:
+                two_fa["notice"] = _pick_msg(two_fa["notice"])
         info: dict[str, Any] = {
             "state": self.state,
-            "message": self.message,
+            "message": _pick_msg(self.message),
             "apple_id": apple_id,
             "china_mainland": settings.get("china_mainland", False),
             "password_saved": bool(apple_id and _safe_get_password(apple_id)),
-            "two_fa": self.two_fa if self.state == "needs_2fa" else None,
+            "two_fa": two_fa,
         }
         if self.state == "ready" and self.api is not None:
             ds = self.api.data.get("dsInfo", {}) if isinstance(self.api.data, dict) else {}
@@ -98,14 +117,14 @@ class ICloudManager:
                     return
                 if not password:
                     self.state = "logged_out"
-                    self.message = "会话已过期，请重新登录"
+                    self.message = ("会话已过期，请重新登录", "Session expired. Please sign in again.")
                     return
                 api.authenticate()
                 self._after_password_auth(api)
             except Exception as exc:  # noqa: BLE001
                 log.exception("Session restore failed")
                 self.state = "logged_out"
-                self.message = f"自动登录失败：{exc}"
+                self.message = (f"自动登录失败：{exc}", f"Auto sign-in failed: {exc}")
 
     # ------------------------------------------------------------------- login
     def login(self, apple_id: str, password: str, china_mainland: bool, remember: bool) -> dict[str, Any]:
@@ -117,7 +136,7 @@ class ICloudManager:
                 api = self._make_api(apple_id, password, china_mainland, authenticate=True)
             except PyiCloudFailedLoginException as exc:
                 self.state = "logged_out"
-                raise ValueError(f"登录失败：{exc}") from exc
+                raise ValueError(tr(f"登录失败：{exc}", f"Sign-in failed: {exc}")) from exc
             save_settings(apple_id=apple_id, china_mainland=china_mainland)
             if remember:
                 try:
@@ -146,32 +165,32 @@ class ICloudManager:
         try:
             if getattr(api, "fido2_devices", None):
                 info["method"] = "security_key"
-                info["notice"] = "此账户使用安全密钥验证，本客户端暂不支持。"
+                info["notice"] = ("此账户使用安全密钥验证，本客户端暂不支持。", "This account uses Security Keys, which are not supported by this client yet.")
             elif not api.request_2fa_code():
                 info["method"] = "security_key"
-                info["notice"] = "此账户需要安全密钥验证，本客户端暂不支持。"
+                info["notice"] = ("此账户需要安全密钥验证，本客户端暂不支持。", "This account requires Security Key verification, which is not supported yet.")
             else:
                 info["method"] = api.two_factor_delivery_method
                 info["notice"] = api.two_factor_delivery_notice
         except PyiCloudAPIResponseException:
             api.use_existing_trusted_device_code()
             info["method"] = "trusted_device"
-            info["notice"] = "如果你的设备上已经显示验证码，请直接输入。"
+            info["notice"] = ("如果你的设备上已经显示验证码，请直接输入。", "If a verification code is already shown on your device, enter it directly.")
         except Exception as exc:  # noqa: BLE001
-            info["notice"] = f"请求验证码失败：{exc}"
+            info["notice"] = (f"请求验证码失败：{exc}", f"Failed to request verification code: {exc}")
         self.two_fa = info
 
     def request_2fa(self) -> dict[str, Any]:
         with self.lock:
             if self.state != "needs_2fa" or self.api is None:
-                raise ValueError("当前不需要双重认证")
+                raise ValueError(tr("当前不需要双重认证", "Two-factor authentication is not required right now"))
             self._request_2fa_locked()
             return self.status()
 
     def verify_2fa(self, code: str) -> dict[str, Any]:
         with self.lock:
             if self.state != "needs_2fa" or self.api is None:
-                raise ValueError("当前不需要双重认证")
+                raise ValueError(tr("当前不需要双重认证", "Two-factor authentication is not required right now"))
             api = self.api
             code = code.strip()
             if self.two_fa.get("method") == "2sa":
@@ -180,7 +199,7 @@ class ICloudManager:
             else:
                 ok = api.validate_2fa_code(code)
             if not ok:
-                raise ValueError("验证码错误，请重试")
+                raise ValueError(tr("验证码错误，请重试", "Invalid verification code, please try again"))
             if not api.is_trusted_session:
                 api.trust_session()
             self._set_ready(api)
@@ -232,14 +251,14 @@ class ICloudManager:
         password = _safe_get_password(apple_id) if apple_id else None
         if not apple_id or not password:
             self.state = "logged_out"
-            self.message = "会话已过期，且未保存密码，请重新登录"
+            self.message = ("会话已过期，且未保存密码，请重新登录", "Session expired and no saved password is available. Please sign in again.")
             raise NotLoggedIn(self.state, self.message)
         api = self._make_api(apple_id, password, settings.get("china_mainland", False), authenticate=False)
         api.authenticate(force_refresh=True)
         self.cache.clear()
         self._after_password_auth(api)
         if self.state != "ready":
-            raise NotLoggedIn(self.state, "需要重新进行双重认证")
+            raise NotLoggedIn(self.state, ("需要重新进行双重认证", "Two-factor authentication is required again"))
 
     # ---------------------------------------------------------------- helpers
     def _make_api(self, apple_id: str, password: str | None, china: bool, *, authenticate: bool) -> PyiCloudService:

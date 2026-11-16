@@ -30,6 +30,7 @@ from typing import Any
 
 from . import __version__
 from .config import DATA_DIR, LOG_DIR
+from .i18n import tr
 
 DEFAULT_PORT = 48848
 DEMO_PORT = 48858
@@ -146,7 +147,10 @@ def ensure(demo: bool = False, timeout: float = 45) -> dict[str, Any]:
         st = running(demo)
         if st:
             return describe(st)
-    raise RuntimeError(f"后台服务启动超时，请查看日志：{LOG_DIR / 'daemon.log'}")
+    raise RuntimeError(tr(
+        f"后台服务启动超时，请查看日志：{LOG_DIR / 'daemon.log'}",
+        f"Timed out starting background daemon. Check logs: {LOG_DIR / 'daemon.log'}",
+    ))
 
 
 def stop(demo: bool = False, timeout: float = 10) -> bool:

@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from ..i18n import tr
 from .common import run
 
 router = APIRouter(prefix="/api", tags=["misc"])
@@ -51,7 +52,7 @@ def contacts():
 def contact_photo(url: str):
     host = urlparse(url).hostname or ""
     if not (host.endswith(".icloud.com") or host.endswith(".icloud.com.cn") or host.endswith(".apple.com")):
-        raise HTTPException(400, "不允许的地址")
+        raise HTTPException(400, tr("不允许的地址", "Disallowed URL"))
     resp = run(lambda api: api.session.get(url))
     return Response(resp.content, media_type=resp.headers.get("Content-Type", "image/jpeg"))
 
@@ -65,7 +66,7 @@ class MessageBody(BaseModel):
 
 class LostBody(BaseModel):
     number: str
-    text: str = "这台设备已丢失，请联系我。"
+    text: str = ""
 
 
 def _device(dev: Any) -> dict[str, Any]:
@@ -110,7 +111,7 @@ def _find(api: Any, device_id: str) -> Any:
     for dev in api.devices:
         if dev.data.get("id") == device_id:
             return dev
-    raise HTTPException(404, "设备不存在")
+    raise HTTPException(404, tr("设备不存在", "Device not found"))
 
 
 @router.post("/findmy/devices/{device_id}/sound")
@@ -127,7 +128,8 @@ def message(device_id: str, body: MessageBody):
 
 @router.post("/findmy/devices/{device_id}/lost")
 def lost(device_id: str, body: LostBody):
-    run(lambda api: _find(api, device_id).lost_device(body.number, body.text))
+    text = body.text or tr("这台设备已丢失，请联系我。", "This device has been lost. Please call me.")
+    run(lambda api: _find(api, device_id).lost_device(body.number, text))
     return {"ok": True}
 
 
@@ -172,7 +174,7 @@ def reserve(body: AliasBody):
     def _do(api: Any) -> dict[str, Any]:
         email = body.email or api.hidemyemail.generate()
         if not email:
-            raise HTTPException(502, "生成地址失败")
+            raise HTTPException(502, tr("生成地址失败", "Failed to generate email address"))
         return api.hidemyemail.reserve(email, body.label, body.note or "Generated")
 
     return run(_do)

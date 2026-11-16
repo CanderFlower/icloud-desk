@@ -1,5 +1,6 @@
 // Contacts — pinyin-aware alphabetical list, detail card, vCard export. Read-only.
 import { get } from '../api.js';
+import { countText, lang, MONTHS_SHORT_EN, tx } from '../i18n.js';
 import {
   h, clear, icon, iconBtn, toolbar, searchBox, menu, toast, toastError, empty, errorBox, skeleton,
   fmt, store, copyText, isTyping, shell,
@@ -11,12 +12,20 @@ const BOUND = '阿八嚓哒妸发旮哈讥咔垃妈拏噢妑七呥仨他屲夕�
 const LETTERS = 'ABCDEFGHJKLMNOPQRSTWXYZ';
 const CJK = /[\u3400-\u9fff\uf900-\ufaff]/;
 
-const LABELS = {
+const LABELS_ZH = {
   MOBILE: '手机', CELL: '手机', IPHONE: 'iPhone', HOME: '住宅', WORK: '工作', MAIN: '主要', OTHER: '其他', PAGER: '传呼机',
   'HOME FAX': '住宅传真', 'WORK FAX': '工作传真', FAX: '传真', SCHOOL: '学校', HOMEPAGE: '主页', ICLOUD: 'iCloud',
 };
+const LABELS_EN = {
+  MOBILE: 'mobile', CELL: 'mobile', IPHONE: 'iPhone', HOME: 'home', WORK: 'work', MAIN: 'main', OTHER: 'other', PAGER: 'pager',
+  'HOME FAX': 'home fax', 'WORK FAX': 'work fax', FAX: 'fax', SCHOOL: 'school', HOMEPAGE: 'home page', ICLOUD: 'iCloud',
+};
 const rawLabel = (l) => String(l || '').replace(/^_\$!<(.+)>!\$_$/, '$1').trim();
-const label = (l, fallback) => { const s = rawLabel(l); return s ? (LABELS[s.toUpperCase()] || s) : fallback; };
+const label = (l, fallback) => {
+  const s = rawLabel(l);
+  const dict = lang.isEn ? LABELS_EN : LABELS_ZH;
+  return s ? (dict[s.toUpperCase()] || s) : fallback;
+};
 
 const TINTS = [
   ['#ffb340', '#ff8a00'], ['#6ac4ff', '#1f8fff'], ['#5fd3e6', '#20a5bd'], ['#62d77f', '#2fb350'],
@@ -40,7 +49,7 @@ function displayName(c) {
   if (c.is_company && c.company) return c.company;
   if (n && n !== [l, f].filter(Boolean).join(' ')) return n;
   if (f || l) return CJK.test(f + l) ? l + f : [f, l].filter(Boolean).join(' ');
-  return n || c.company || c.nickname || c.emails?.[0]?.field || c.phones?.[0]?.field || '无姓名';
+  return n || c.company || c.nickname || c.emails?.[0]?.field || c.phones?.[0]?.field || tx('无姓名', 'No Name');
 }
 
 function monogram(name) {
@@ -81,10 +90,12 @@ function bdayInfo(b) {
   if (next < now) next.setFullYear(now.getFullYear() + 1);
   const days = Math.round((next - now) / 86400000);
   const age = b.y ? next.getFullYear() - b.y : null;
-  const when = days === 0 ? '今天生日' : days === 1 ? '明天生日' : `还有 ${days} 天`;
+  const when = days === 0 ? tx('今天生日', 'Birthday today') : days === 1 ? tx('明天生日', 'Birthday tomorrow') : tx(`还有 ${days} 天`, `in ${days} days`);
   return {
-    text: `${b.y ? `${b.y}年` : ''}${b.m}月${b.d}日`,
-    sub: [when, age ? (days === 0 ? `${age} 岁` : `将满 ${age} 岁`) : null].filter(Boolean).join(' · '),
+    text: lang.isEn
+      ? `${MONTHS_SHORT_EN[b.m - 1]} ${b.d}${b.y ? `, ${b.y}` : ''}`
+      : `${b.y ? `${b.y}年` : ''}${b.m}月${b.d}日`,
+    sub: [when, age ? (days === 0 ? tx(`${age} 岁`, `Turns ${age}`) : tx(`将满 ${age} 岁`, `Turning ${age}`)) : null].filter(Boolean).join(' · '),
     days,
   };
 }
@@ -133,15 +144,18 @@ function saveVcf(list, base) {
   const a = h('a', { href: url, download: `${base.replace(/[\\/:*?"<>|]/g, '_')}.vcf` });
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
-  toast(list.length > 1 ? `已导出 ${list.length} 位联系人` : `已导出“${list[0]._name}”`, 'success', 1800);
+  toast(list.length > 1
+    ? tx(`已导出 ${list.length} 位联系人`, `Exported ${list.length} contacts`)
+    : tx(`已导出“${list[0]._name}”`, `Exported “${list[0]._name}”`), 'success', 1800);
 }
 
 function cardText(c) {
+  const sep = lang.isEn ? ': ' : '：';
   return [
     c._name, c._sub,
-    ...(c.phones || []).map((p) => `${label(p.label, '电话')}：${p.field}`),
-    ...(c.emails || []).map((m) => `${label(m.label, '邮件')}：${m.field}`),
-    ...(c.addresses || []).map((a) => `${label(a.label, '地址')}：${addrText(a, true)}`),
+    ...(c.phones || []).map((p) => `${label(p.label, tx('电话', 'Phone'))}${sep}${p.field}`),
+    ...(c.emails || []).map((m) => `${label(m.label, tx('邮件', 'Email'))}${sep}${m.field}`),
+    ...(c.addresses || []).map((a) => `${label(a.label, tx('地址', 'Address'))}${sep}${addrText(a, true)}`),
   ].filter(Boolean).join('\n');
 }
 
@@ -162,7 +176,7 @@ const openUrl = (u) => shell.openExternal(/^[a-z][\w+.-]*:/i.test(u) ? u : `http
 
 export default {
   id: 'contacts',
-  title: '通讯录',
+  get title() { return tx('通讯录', 'Contacts'); },
   app: 'contacts',
   mount(el, { params } = {}) {
     const S = { all: [], view: [], q: '', sel: params?.[0] || store.get('ct.sel', null) };
@@ -171,16 +185,16 @@ export default {
 
     // ------------------------------------------------------------ layout
     const countEl = h('span');
-    const refreshBtn = iconBtn('refresh-cw', '刷新 (F5)', () => load());
+    const refreshBtn = iconBtn('refresh-cw', tx('刷新 (F5)', 'Refresh (F5)'), () => load());
     refreshBtn.dataset.refresh = '';
-    const exportBtn = iconBtn('file-down', '导出 vCard', (e) => exportMenu(e.currentTarget));
-    const backBtn = iconBtn('chevron-left', '返回通讯录', () => showDetail(false), { cls: 'only-narrow ct-back' });
-    const tb = toolbar({ title: '通讯录', subtitle: countEl, left: [backBtn], right: [exportBtn, refreshBtn] });
+    const exportBtn = iconBtn('file-down', tx('导出 vCard', 'Export vCard'), (e) => exportMenu(e.currentTarget));
+    const backBtn = iconBtn('chevron-left', tx('返回通讯录', 'Back to Contacts'), () => showDetail(false), { cls: 'only-narrow ct-back' });
+    const tb = toolbar({ title: tx('通讯录', 'Contacts'), subtitle: countEl, left: [backBtn], right: [exportBtn, refreshBtn] });
 
-    const search = searchBox({ placeholder: '搜索姓名、电话或邮件', oninput: (v) => { S.q = v; renderList(); } });
-    search.input.setAttribute('aria-label', '搜索联系人');
+    const search = searchBox({ placeholder: tx('搜索姓名、电话或邮件', 'Search name, phone, or email'), oninput: (v) => { S.q = v; renderList(); } });
+    search.input.setAttribute('aria-label', tx('搜索联系人', 'Search contacts'));
     const listBody = h('div', { class: 'pane-body ct-list' });
-    const index = h('nav', { class: 'ct-index', 'aria-label': '字母索引' });
+    const index = h('nav', { class: 'ct-index', 'aria-label': tx('字母索引', 'Alphabetical index') });
     const detailBody = h('div', { class: 'pane-body ct-detail' });
     const panes = h('div', { class: 'panes stack ct-panes' },
       h('div', { class: 'pane list ct-list-pane' }, h('div', { class: 'ct-search' }, search), h('div', { class: 'ct-list-wrap' }, listBody, index)),
@@ -201,7 +215,11 @@ export default {
         else {
           countEl.textContent = '';
           clear(listBody, errorBox(e));
-          clear(detailBody, empty({ app: 'contacts', title: '无法载入通讯录', text: '请检查网络连接后重试。', action: { label: '重试', icon: 'refresh-cw', onClick: load } }));
+          clear(detailBody, empty({
+            app: 'contacts', title: tx('无法载入通讯录', 'Could Not Load Contacts'),
+            text: tx('请检查网络连接后重试。', 'Check your internet connection and try again.'),
+            action: { label: tx('重试', 'Retry'), icon: 'refresh-cw', onClick: load },
+          }));
           return;
         }
       } finally {
@@ -225,15 +243,17 @@ export default {
     // ------------------------------------------------------------- list
     function renderList() {
       S.view = S.q ? S.all.filter((c) => matches(c, S.q)) : S.all;
-      countEl.textContent = S.q ? `${S.view.length} / ${S.all.length} 位联系人` : `${S.all.length} 位联系人`;
+      countEl.textContent = S.q
+        ? `${S.view.length} / ${countText(S.all.length, '位联系人', 'contact')}`
+        : countText(S.all.length, '位联系人', 'contact');
       rowEls.clear();
       index.replaceChildren();
       if (!S.all.length) {
-        clear(listBody, empty({ icon: 'contact-round', title: '没有联系人', text: '在 iPhone 或 iCloud.com 上添加的联系人会显示在这里。', compact: true }));
+        clear(listBody, empty({ icon: 'contact-round', title: tx('没有联系人', 'No Contacts'), text: tx('在 iPhone 或 iCloud.com 上添加的联系人会显示在这里。', 'Contacts added on your iPhone or iCloud.com appear here.'), compact: true }));
         return;
       }
       if (!S.view.length) {
-        clear(listBody, empty({ icon: 'search', title: '无结果', text: `没有与“${S.q}”匹配的联系人。`, compact: true }));
+        clear(listBody, empty({ icon: 'search', title: tx('无结果', 'No Results'), text: tx(`没有与“${S.q}”匹配的联系人。`, `No contacts matching “${S.q}”.`), compact: true }));
         return;
       }
       const out = []; const letters = []; let cur = null;
@@ -244,9 +264,9 @@ export default {
         }
         out.push(row(c));
       }
-      clear(listBody, h('div', { class: 'ct-rows', role: 'listbox', 'aria-label': '联系人' }, out),
-        h('div', { class: 'ct-list-foot' }, `${S.view.length} 位联系人`));
-      if (letters.length > 1) index.append(...letters.map((L) => h('button', { type: 'button', tabindex: '-1', dataset: { letter: L }, 'aria-label': `跳到 ${L}` }, L)));
+      clear(listBody, h('div', { class: 'ct-rows', role: 'listbox', 'aria-label': tx('联系人', 'Contacts') }, out),
+        h('div', { class: 'ct-list-foot' }, countText(S.view.length, '位联系人', 'contact')));
+      if (letters.length > 1) index.append(...letters.map((L) => h('button', { type: 'button', tabindex: '-1', dataset: { letter: L }, 'aria-label': tx(`跳到 ${L}`, `Jump to ${L}`) }, L)));
     }
 
     function row(c) {
@@ -261,7 +281,7 @@ export default {
       h('div', { class: 'ct-row-text' },
         h('div', { class: 'primary' }, c._name),
         c._sub ? h('div', { class: 'secondary' }, c._sub) : null),
-      soon ? icon('cake', { size: 'sm', cls: 'ct-row-bday', title: '生日快到了' }) : null);
+      soon ? icon('cake', { size: 'sm', cls: 'ct-row-bday', title: tx('生日快到了', 'Upcoming birthday') }) : null);
       rowEls.set(c.id, r);
       return r;
     }
@@ -310,43 +330,45 @@ export default {
     function rowMenu(e, c) {
       const phone = c.phones?.[0]?.field; const mail = c.emails?.[0]?.field;
       menu(e, [
-        { label: '复制姓名', icon: 'copy', onClick: () => copyText(c._name) },
-        phone && { label: '复制电话号码', icon: 'phone', onClick: () => copyText(phone) },
-        mail && { label: '复制电子邮件', icon: 'mail', onClick: () => copyText(mail) },
-        { label: '复制全部信息', icon: 'clipboard', onClick: () => copyText(cardText(c), '已复制联系人信息') },
+        { label: tx('复制姓名', 'Copy Name'), icon: 'copy', onClick: () => copyText(c._name) },
+        phone && { label: tx('复制电话号码', 'Copy Phone Number'), icon: 'phone', onClick: () => copyText(phone) },
+        mail && { label: tx('复制电子邮件', 'Copy Email'), icon: 'mail', onClick: () => copyText(mail) },
+        { label: tx('复制全部信息', 'Copy Contact Info'), icon: 'clipboard', onClick: () => copyText(cardText(c), tx('已复制联系人信息', 'Contact info copied')) },
         '-',
-        mail && { label: '发送邮件', icon: 'send', onClick: () => shell.openExternal(`mailto:${mail}`) },
-        { label: '导出 vCard', icon: 'file-down', onClick: () => saveVcf([c], c._name) },
+        mail && { label: tx('发送邮件', 'Send Email'), icon: 'send', onClick: () => shell.openExternal(`mailto:${mail}`) },
+        { label: tx('导出 vCard', 'Export vCard'), icon: 'file-down', onClick: () => saveVcf([c], c._name) },
       ]);
     }
 
     function exportMenu(at) {
-      if (!S.all.length) { toast('没有可导出的联系人'); return; }
+      if (!S.all.length) { toast(tx('没有可导出的联系人', 'No contacts to export')); return; }
       const cur = S.all.find((c) => c.id === S.sel);
+      const baseName = tx('通讯录', 'Contacts');
       menu(at, [
-        { section: '导出为 vCard 文件' },
-        { label: `所有联系人（${S.all.length}）`, icon: 'users', onClick: () => saveVcf(S.all, '通讯录') },
-        S.q && S.view.length && { label: `搜索结果（${S.view.length}）`, icon: 'search', onClick: () => saveVcf(S.view, `通讯录 - ${S.q}`) },
+        { section: tx('导出为 vCard 文件', 'Export as vCard') },
+        { label: tx(`所有联系人（${S.all.length}）`, `All Contacts (${S.all.length})`), icon: 'users', onClick: () => saveVcf(S.all, baseName) },
+        S.q && S.view.length && { label: tx(`搜索结果（${S.view.length}）`, `Search Results (${S.view.length})`), icon: 'search', onClick: () => saveVcf(S.view, `${baseName} - ${S.q}`) },
         cur && { label: `“${cur._name}”`, icon: 'contact-round', onClick: () => saveVcf([cur], cur._name) },
       ], { align: 'end' });
     }
 
     // ----------------------------------------------------------- detail
     function infoRow(lbl, value, { open, openTip, ic, extra, copy = value } = {}) {
+      const copyTip = tx(`复制${lbl}`, `Copy ${lbl}`);
       const v = open
         ? h('button', { type: 'button', class: 'ct-value link', title: openTip, onclick: open }, value)
-        : h('button', { type: 'button', class: 'ct-value', title: '点按以复制', onclick: () => copyText(copy) }, value);
+        : h('button', { type: 'button', class: 'ct-value', title: tx('点按以复制', 'Click to copy'), onclick: () => copyText(copy) }, value);
       return h('div', {
         class: 'group-row ct-info',
         oncontextmenu: (e) => {
           e.preventDefault();
-          menu(e, [{ label: `复制${lbl}`, icon: 'copy', onClick: () => copyText(copy) }, open && { label: openTip, icon: ic || 'external-link', onClick: open }]);
+          menu(e, [{ label: copyTip, icon: 'copy', onClick: () => copyText(copy) }, open && { label: openTip, icon: ic || 'external-link', onClick: open }]);
         },
       },
       h('div', { class: 'ct-info-main' }, h('div', { class: 'ct-label' }, lbl), v, extra || null),
       h('div', { class: 'ct-info-actions' },
         open && ic ? iconBtn(ic, openTip, open, { size: 'sm' }) : null,
-        iconBtn('copy', `复制${lbl}`, () => copyText(copy), { size: 'sm' })));
+        iconBtn('copy', copyTip, () => copyText(copy), { size: 'sm' })));
     }
 
     function quick(ic, text, fn, tip) {
@@ -358,32 +380,32 @@ export default {
       const c = S.all.find((x) => x.id === S.sel);
       detailBody.scrollTop = 0;
       if (!c) {
-        clear(detailBody, S.all.length ? empty({ app: 'contacts', title: '未选择联系人', text: '从列表中选择一位联系人以查看详细信息。' }) : null);
+        clear(detailBody, S.all.length ? empty({ app: 'contacts', title: tx('未选择联系人', 'No Contact Selected'), text: tx('从列表中选择一位联系人以查看详细信息。', 'Select a contact from the list to view details.') }) : null);
         return;
       }
       const phone = c.phones?.[0]?.field; const mail = c.emails?.[0]?.field; const addr = c.addresses?.[0];
       const groups = [];
       const grp = (rows) => rows.length && groups.push(h('div', { class: 'group ct-group' }, rows));
 
-      grp((c.phones || []).map((p) => infoRow(label(p.label, '电话'), p.field)));
-      grp((c.emails || []).map((m) => infoRow(label(m.label, '电子邮件'), m.field, {
-        open: () => shell.openExternal(`mailto:${m.field}`), openTip: '发送邮件', ic: 'send',
+      grp((c.phones || []).map((p) => infoRow(label(p.label, tx('电话', 'phone')), p.field)));
+      grp((c.emails || []).map((m) => infoRow(label(m.label, tx('电子邮件', 'email')), m.field, {
+        open: () => shell.openExternal(`mailto:${m.field}`), openTip: tx('发送邮件', 'Send email'), ic: 'send',
       })));
-      grp((c.addresses || []).map((a) => infoRow(label(a.label, '地址'), addrText(a), {
-        open: () => openMap(a), openTip: '在地图中打开', ic: 'map-pin', copy: addrText(a, true),
+      grp((c.addresses || []).map((a) => infoRow(label(a.label, tx('地址', 'address')), addrText(a), {
+        open: () => openMap(a), openTip: tx('在地图中打开', 'Open in Maps'), ic: 'map-pin', copy: addrText(a, true),
       })));
       const b = parseBday(c.birthday);
       const extra = [];
       if (b) {
         const bi = bdayInfo(b);
-        extra.push(infoRow('生日', bi.text, { extra: h('div', { class: `ct-sub${bi.days <= 7 ? ' soon' : ''}` }, icon('cake', { size: 'sm' }), bi.sub) }));
+        extra.push(infoRow(tx('生日', 'birthday'), bi.text, { extra: h('div', { class: `ct-sub${bi.days <= 7 ? ' soon' : ''}` }, icon('cake', { size: 'sm' }), bi.sub) }));
       }
-      if (c.nickname) extra.push(infoRow('昵称', c.nickname));
+      if (c.nickname) extra.push(infoRow(tx('昵称', 'nickname'), c.nickname));
       grp(extra);
-      grp((c.urls || []).map((u) => infoRow(label(u.label, '网址'), u.field, { open: () => openUrl(u.field), openTip: '在浏览器中打开', ic: 'external-link' })));
+      grp((c.urls || []).map((u) => infoRow(label(u.label, tx('网址', 'website')), u.field, { open: () => openUrl(u.field), openTip: tx('在浏览器中打开', 'Open in browser'), ic: 'external-link' })));
       if (c.notes) {
         groups.push(h('div', { class: 'group ct-group' }, h('div', { class: 'group-row ct-notes' },
-          h('div', { class: 'ct-info-main' }, h('div', { class: 'ct-label' }, '备注'), h('div', { class: 'ct-note-text selectable' }, c.notes)))));
+          h('div', { class: 'ct-info-main' }, h('div', { class: 'ct-label' }, tx('备注', 'notes')), h('div', { class: 'ct-note-text selectable' }, c.notes)))));
       }
 
       const role = c.is_company ? c.job_title : [c.job_title, c.company].filter(Boolean).join(' · ');
@@ -394,13 +416,13 @@ export default {
           c.nickname ? h('div', { class: 'ct-nick' }, `“${c.nickname}”`) : null,
           role ? h('div', { class: 'ct-role' }, c.is_company ? icon('building-2', { size: 'sm' }) : null, role) : null,
           h('div', { class: 'ct-quick' },
-            quick('phone', '电话', phone && (() => copyText(phone, `已复制 ${phone}`)), phone ? `复制 ${phone}` : '无电话号码'),
-            quick('mail', '邮件', mail && (() => shell.openExternal(`mailto:${mail}`)), mail ? `发送邮件至 ${mail}` : '无电子邮件'),
-            quick('map-pin', '地图', addr && (() => openMap(addr)), addr ? '在地图中打开' : '无地址'),
-            quick('file-down', '导出', () => saveVcf([c], c._name), '导出为 vCard'))),
+            quick('phone', tx('电话', 'Call'), phone && (() => copyText(phone, tx(`已复制 ${phone}`, `Copied ${phone}`))), phone ? tx(`复制 ${phone}`, `Copy ${phone}`) : tx('无电话号码', 'No phone number')),
+            quick('mail', tx('邮件', 'Mail'), mail && (() => shell.openExternal(`mailto:${mail}`)), mail ? tx(`发送邮件至 ${mail}`, `Email ${mail}`) : tx('无电子邮件', 'No email')),
+            quick('map-pin', tx('地图', 'Maps'), addr && (() => openMap(addr)), addr ? tx('在地图中打开', 'Open in Maps') : tx('无地址', 'No address')),
+            quick('file-down', tx('导出', 'Export'), () => saveVcf([c], c._name), tx('导出为 vCard', 'Export as vCard')))),
         groups.length ? h('div', { class: 'ct-groups' }, groups)
-          : h('div', { class: 'ct-none' }, '此联系人没有其他信息。'),
-        h('p', { class: 'ct-foot' }, icon('info', { size: 'sm' }), '通讯录为只读，请在 iPhone 或 iCloud.com 上编辑联系人。')));
+          : h('div', { class: 'ct-none' }, tx('此联系人没有其他信息。', 'No additional details for this contact.')),
+        h('p', { class: 'ct-foot' }, icon('info', { size: 'sm' }), tx('通讯录为只读，请在 iPhone 或 iCloud.com 上编辑联系人。', 'Contacts are read-only here. Edit contacts on your iPhone or iCloud.com.'))));
     }
 
     // --------------------------------------------------------- keyboard

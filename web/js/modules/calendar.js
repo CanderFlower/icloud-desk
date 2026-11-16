@@ -1,25 +1,32 @@
 // Calendar — day / week / month / list views, drag to create · move · resize,
 // event popover + editor, calendar visibility and management.
 import { get, cachedGet, peekCache, post, put, del, enc } from '../api.js';
+import { countText, lang, MONTHS_EN, MONTHS_SHORT_EN, tx } from '../i18n.js';
 import {
   h, clear, icon, iconBtn, btn, toolbar, segmented, switchEl, field, menu, popover, modal, confirmDialog,
   toast, toastError, errorBox, empty, skeleton, colorSwatches, fmt, toDate, store, isTyping, shell,
 } from '../ui.js';
 
-const WD = ['一', '二', '三', '四', '五', '六', '日'];
+const WD_ZH = ['一', '二', '三', '四', '五', '六', '日'];
+const WD_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const WD_MINI_EN = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const DAY = 86400000;
 const HOUR = 48; // px per hour in the time grid
 const SNAP = 15; // minutes
 const LIST_DAYS = 35;
-const ALARMS = [
-  [-1, '无'], [0, '日程发生时'], [5, '5 分钟前'], [10, '10 分钟前'], [15, '15 分钟前'], [30, '30 分钟前'],
-  [60, '1 小时前'], [120, '2 小时前'], [1440, '1 天前'], [2880, '2 天前'], [10080, '1 周前'],
+const alarmsList = () => [
+  [-1, tx('无', 'None')], [0, tx('日程发生时', 'At time of event')],
+  [5, tx('5 分钟前', '5 minutes before')], [10, tx('10 分钟前', '10 minutes before')],
+  [15, tx('15 分钟前', '15 minutes before')], [30, tx('30 分钟前', '30 minutes before')],
+  [60, tx('1 小时前', '1 hour before')], [120, tx('2 小时前', '2 hours before')],
+  [1440, tx('1 天前', '1 day before')], [2880, tx('2 天前', '2 days before')],
+  [10080, tx('1 周前', '1 week before')],
 ];
-const VIEWS = [
-  { value: 'day', label: '日', tip: '日 (D)' },
-  { value: 'week', label: '周', tip: '周 (W)' },
-  { value: 'month', label: '月', tip: '月 (M)' },
-  { value: 'list', label: '列表', tip: '日程列表 (L)' },
+const viewsList = () => [
+  { value: 'day', label: tx('日', 'Day'), tip: tx('日 (D)', 'Day (D)') },
+  { value: 'week', label: tx('周', 'Week'), tip: tx('周 (W)', 'Week (W)') },
+  { value: 'month', label: tx('月', 'Month'), tip: tx('月 (M)', 'Month (M)') },
+  { value: 'list', label: tx('列表', 'List'), tip: tx('日程列表 (L)', 'Event list (L)') },
 ];
 
 const sod = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -28,8 +35,8 @@ const addMin = (d, n) => new Date(+d + n * 60000);
 const monday = (d) => addDays(sod(d), -((d.getDay() + 6) % 7));
 const same = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 const dayDiff = (a, b) => Math.round((sod(b) - sod(a)) / DAY);
-const wd = (d) => `周${WD[(d.getDay() + 6) % 7]}`;
-const md = (d) => `${d.getMonth() + 1}月${d.getDate()}日`;
+const wd = (d) => (lang.isEn ? WD_EN[(d.getDay() + 6) % 7] : `周${WD_ZH[(d.getDay() + 6) % 7]}`);
+const md = (d) => fmt.shortDate(d);
 const snap = (m) => Math.round(m / SNAP) * SNAP;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
@@ -49,8 +56,11 @@ const order = (a, b) => (isBar(b) - isBar(a)) || (a.s - b.s) || ((b.e - b.s) - (
 
 function whenText(ev) {
   const last = lastDay(ev);
+  const allDayText = tx('全天', 'All day');
   if (ev.all_day) {
-    return same(ev.s, last) ? `${fmt.date(ev.s)} ${wd(ev.s)} · 全天` : `${fmt.date(ev.s)} 至 ${fmt.date(last)} · 全天`;
+    return same(ev.s, last)
+      ? `${fmt.date(ev.s)} ${wd(ev.s)} · ${allDayText}`
+      : `${fmt.date(ev.s)} – ${fmt.date(last)} · ${allDayText}`;
   }
   if (same(ev.s, ev.e) || same(ev.s, last)) return `${fmt.date(ev.s)} ${wd(ev.s)} · ${fmt.time(ev.s)} – ${fmt.time(ev.e)}`;
   return `${md(ev.s)} ${fmt.time(ev.s)} – ${md(ev.e)} ${fmt.time(ev.e)}`;
@@ -94,9 +104,10 @@ function layoutColumn(list) {
 
 export default {
   id: 'calendar',
-  title: '日历',
+  get title() { return tx('日历', 'Calendar'); },
   app: 'calendar',
   mount(el) {
+    const VIEWS = viewsList();
     const S = {
       view: store.get('cal.view', 'month'),
       cursor: sod(new Date()),
@@ -118,27 +129,27 @@ export default {
     const side = h('div', { class: 'pane side cal-side' },
       h('div', { class: 'pane-body' },
         miniEl,
-        h('div', { class: 'side-title' }, '日历', iconBtn('plus', '新建日历', () => newCalendar(), { size: 'sm' })),
+        h('div', { class: 'side-title' }, tx('日历', 'Calendars'), iconBtn('plus', tx('新建日历', 'New calendar'), () => newCalendar(), { size: 'sm' })),
         calsEl));
 
     const titleEl = h('div', { class: 'cal-title' });
     const seg = segmented(VIEWS, S.view, (v) => setView(v), { cls: 'hide-narrow' });
     const viewBtn = h('button', { type: 'button', class: 'btn sm only-narrow cal-viewbtn', onclick: (e) => viewMenu(e.currentTarget) });
-    const refreshBtn = iconBtn('refresh-cw', '刷新 (F5)', () => reload(), { cls: 'hide-narrow' });
+    const refreshBtn = iconBtn('refresh-cw', tx('刷新 (F5)', 'Refresh (F5)'), () => reload(), { cls: 'hide-narrow' });
     refreshBtn.dataset.refresh = '';
     const tb = toolbar({
       title: titleEl,
       right: [
-        iconBtn('calendar-days', '显示的日历', (e) => calsMenu(e.currentTarget), { cls: 'when-side-hidden' }),
+        iconBtn('calendar-days', tx('显示的日历', 'Visible calendars'), (e) => calsMenu(e.currentTarget), { cls: 'when-side-hidden' }),
         h('div', { class: 'cal-nav' },
-          iconBtn('chevron-left', '上一页 (←)', () => step(-1)),
-          h('button', { type: 'button', class: 'btn sm', 'data-tip': '回到今天 (T)', onclick: goToday }, '今天'),
-          iconBtn('chevron-right', '下一页 (→)', () => step(1))),
+          iconBtn('chevron-left', tx('上一页 (←)', 'Previous (←)'), () => step(-1)),
+          h('button', { type: 'button', class: 'btn sm', 'data-tip': tx('回到今天 (T)', 'Go to Today (T)'), onclick: goToday }, tx('今天', 'Today')),
+          iconBtn('chevron-right', tx('下一页 (→)', 'Next (→)'), () => step(1))),
         seg, viewBtn,
         h('span', { class: 'sep hide-narrow' }),
         refreshBtn,
-        h('button', { class: 'btn primary sm cal-new', type: 'button', dataset: { new: '' }, 'aria-label': '新建日程', 'data-tip': '新建日程 (Ctrl+N)', onclick: () => newAt() },
-          icon('plus'), h('span', { class: 'hide-narrow' }, '新建日程')),
+        h('button', { class: 'btn primary sm cal-new', type: 'button', dataset: { new: '' }, 'aria-label': tx('新建日程', 'New Event'), 'data-tip': tx('新建日程 (Ctrl+N)', 'New Event (Ctrl+N)'), onclick: () => newAt() },
+          icon('plus'), h('span', { class: 'hide-narrow' }, tx('新建日程', 'New Event'))),
       ],
     });
     const bar = h('div', { class: 'cal-loading' });
@@ -229,15 +240,19 @@ export default {
     function update(scrollNow) { render(scrollNow); ensure(); }
 
     function viewMenu(at) {
-      menu(at, VIEWS.map((v) => ({ label: v.label === '列表' ? '列表' : `按${v.label}`, checked: v.value === S.view, onClick: () => setView(v.value) })), { align: 'end' });
+      menu(at, VIEWS.map((v) => ({
+        label: lang.isEn ? v.label : (v.value === 'list' ? '列表' : `按${v.label}`),
+        checked: v.value === S.view,
+        onClick: () => setView(v.value),
+      })), { align: 'end' });
     }
     function calsMenu(at) {
       menu(at, [
-        { section: '显示的日历' },
+        { section: tx('显示的日历', 'Visible Calendars') },
         ...(S.cals || []).map((c) => ({ label: c.title, dot: c.color, checked: !S.hidden.has(c.guid), onClick: () => toggleCal(c.guid) })),
         '-',
-        { label: '显示全部', checked: false, icon: 'eye', onClick: () => { S.hidden.clear(); saveHidden(); } },
-        { label: '新建日历…', checked: false, icon: 'calendar-plus', onClick: () => newCalendar() },
+        { label: tx('显示全部', 'Show All'), checked: false, icon: 'eye', onClick: () => { S.hidden.clear(); saveHidden(); } },
+        { label: tx('新建日历…', 'New Calendar…'), checked: false, icon: 'calendar-plus', onClick: () => newCalendar() },
       ], { align: 'end' });
     }
 
@@ -257,6 +272,16 @@ export default {
 
     function renderTitle() {
       const c = S.cursor; let y = c.getFullYear(); let main_; let extra = null;
+      if (lang.isEn) {
+        if (S.view === 'day') { main_ = `${MONTHS_SHORT_EN[c.getMonth()]} ${c.getDate()}`; extra = wd(c); }
+        else if (S.view === 'week') {
+          const a = monday(c); const b = addDays(a, 6); y = b.getFullYear();
+          main_ = a.getMonth() === b.getMonth() ? MONTHS_EN[a.getMonth()] : `${MONTHS_SHORT_EN[a.getMonth()]} – ${MONTHS_SHORT_EN[b.getMonth()]}`;
+        } else if (S.view === 'month') main_ = MONTHS_EN[c.getMonth()];
+        else { main_ = 'Events'; extra = `from ${md(c)}`; }
+        clear(titleEl, h('b', {}, main_), h('span', { class: 'y' }, ` ${y}`), extra ? h('span', { class: 'x' }, extra) : null);
+        return;
+      }
       if (S.view === 'day') { main_ = md(c); extra = wd(c); }
       else if (S.view === 'week') {
         const a = monday(c); const b = addDays(a, 6); y = b.getFullYear();
@@ -277,14 +302,15 @@ export default {
         for (let d = sod(ev.s), i = 0; d <= lastDay(ev) && i < 42; d = addDays(d, 1), i++) busy.add(fmt.isoDate(d));
       }
       const shift = (n) => { S.mini = new Date(m.getFullYear(), m.getMonth() + n, 1); renderMini(); };
+      const miniHeadText = lang.isEn ? `${MONTHS_SHORT_EN[m.getMonth()]} ${m.getFullYear()}` : `${m.getFullYear()}年${m.getMonth() + 1}月`;
       clear(miniEl,
         h('div', { class: 'cal-mini-head' },
-          h('button', { type: 'button', class: 'cal-mini-title', 'data-tip': '转到此月', onclick: () => goto(m.getMonth() === S.cursor.getMonth() && m.getFullYear() === S.cursor.getFullYear() ? S.cursor : first, 'month') },
-            `${m.getFullYear()}年${m.getMonth() + 1}月`),
-          iconBtn('chevron-left', '上个月', () => shift(-1), { size: 'sm' }),
-          iconBtn('chevron-right', '下个月', () => shift(1), { size: 'sm' })),
+          h('button', { type: 'button', class: 'cal-mini-title', 'data-tip': tx('转到此月', 'Go to month'), onclick: () => goto(m.getMonth() === S.cursor.getMonth() && m.getFullYear() === S.cursor.getFullYear() ? S.cursor : first, 'month') },
+            miniHeadText),
+          iconBtn('chevron-left', tx('上个月', 'Previous month'), () => shift(-1), { size: 'sm' }),
+          iconBtn('chevron-right', tx('下个月', 'Next month'), () => shift(1), { size: 'sm' })),
         h('div', { class: 'cal-mini-grid' },
-          WD.map((w) => h('span', { class: 'wd' }, w)),
+          (lang.isEn ? WD_MINI_EN : WD_ZH).map((w) => h('span', { class: 'wd' }, w)),
           [...Array(42)].map((_, i) => {
             const d = addDays(s, i);
             const cls = ['d',
@@ -300,7 +326,7 @@ export default {
     function renderCals() {
       if (S.calError) { clear(calsEl, errorBox(S.calError)); return; }
       if (!S.cals) { clear(calsEl, skeleton(3, { avatar: false })); return; }
-      if (!S.cals.length) { clear(calsEl, h('div', { class: 'cal-list-empty' }, '没有日历')); return; }
+      if (!S.cals.length) { clear(calsEl, h('div', { class: 'cal-list-empty' }, tx('没有日历', 'No calendars'))); return; }
       clear(calsEl, S.cals.map((c) => {
         const on = !S.hidden.has(c.guid);
         return h('div', {
@@ -311,31 +337,32 @@ export default {
         },
         h('span', { class: 'cal-check' }, icon('check')),
         h('span', { class: 'label' }, c.title),
-        c.read_only ? h('span', { class: 'cal-ro', 'data-tip': c.share_type === 'subscribed' ? '订阅日历 · 只读' : '只读' }, icon(c.share_type === 'subscribed' ? 'link' : 'lock', { size: 'sm' })) : null,
-        iconBtn('ellipsis', '更多', (e) => { e.stopPropagation(); calMenu(e.currentTarget, c); }, { cls: 'more', size: 'sm' }));
+        c.read_only ? h('span', { class: 'cal-ro', 'data-tip': c.share_type === 'subscribed' ? tx('订阅日历 · 只读', 'Subscribed · Read-only') : tx('只读', 'Read-only') }, icon(c.share_type === 'subscribed' ? 'link' : 'lock', { size: 'sm' })) : null,
+        iconBtn('ellipsis', tx('更多', 'More'), (e) => { e.stopPropagation(); calMenu(e.currentTarget, c); }, { cls: 'more', size: 'sm' }));
       }));
     }
     function toggleCal(guid) { S.hidden.has(guid) ? S.hidden.delete(guid) : S.hidden.add(guid); saveHidden(); }
     function saveHidden() { store.set('cal.hidden', [...S.hidden]); renderCals(); render(); }
     function calMenu(at, c) {
       menu(at, [
-        { label: '仅显示此日历', icon: 'eye', onClick: () => { S.hidden = new Set(S.cals.filter((x) => x.guid !== c.guid).map((x) => x.guid)); saveHidden(); } },
-        { label: '显示全部日历', icon: 'layers', onClick: () => { S.hidden.clear(); saveHidden(); } },
+        { label: tx('仅显示此日历', 'Show Only This Calendar'), icon: 'eye', onClick: () => { S.hidden = new Set(S.cals.filter((x) => x.guid !== c.guid).map((x) => x.guid)); saveHidden(); } },
+        { label: tx('显示全部日历', 'Show All Calendars'), icon: 'layers', onClick: () => { S.hidden.clear(); saveHidden(); } },
         '-',
-        { label: '在此日历中新建日程', icon: 'calendar-plus', disabled: c.read_only, onClick: () => newAt(null, { pguid: c.guid }) },
-        { label: '删除日历…', icon: 'trash-2', danger: true, disabled: c.read_only || c.is_default, onClick: () => removeCalendar(c) },
+        { label: tx('在此日历中新建日程', 'New Event in Calendar'), icon: 'calendar-plus', disabled: c.read_only, onClick: () => newAt(null, { pguid: c.guid }) },
+        { label: tx('删除日历…', 'Delete Calendar…'), icon: 'trash-2', danger: true, disabled: c.read_only || c.is_default, onClick: () => removeCalendar(c) },
       ]);
     }
 
     // ---------------------------------------------------------- month view
     const colAt = (box, x, n = 7) => { const r = box.getBoundingClientRect(); return clamp(Math.floor((x - r.left) / (r.width / n)), 0, n - 1); };
+    const untitled = () => tx('（无标题）', '(No Title)');
 
     function renderMonth() {
       const [s, e] = monthRange();
       const weeks = dayDiff(s, e) / 7;
       const body = h('div', { class: 'mv-body', style: { '--weeks': weeks } });
       clear(viewEl, h('div', { class: 'mv' },
-        h('div', { class: 'mv-head' }, WD.map((w, i) => h('div', { class: i > 4 ? 'we' : '' }, `周${w}`))),
+        h('div', { class: 'mv-head' }, (lang.isEn ? WD_EN : WD_ZH.map((w) => `周${w}`)).map((w, i) => h('div', { class: i > 4 ? 'we' : '' }, w))),
         body));
       const rowH = body.clientHeight / weeks || 110;
       const maxLanes = Math.max(1, Math.floor((rowH - 30) / 21));
@@ -349,8 +376,8 @@ export default {
       const cells = days.map((d, i) => h('div', {
         class: `mv-cell${d.getMonth() !== S.cursor.getMonth() ? ' out' : ''}${same(d, today) ? ' today' : ''}${i > 4 ? ' we' : ''}`,
         ondblclick: () => newAt(startOn(d)),
-      }, h('button', { type: 'button', class: 'mv-num', 'aria-label': `${fmt.date(d)}，查看当天`, onclick: () => goto(d, 'day') },
-        d.getDate() === 1 ? `${d.getMonth() + 1}月1日` : d.getDate())));
+      }, h('button', { type: 'button', class: 'mv-num', 'aria-label': fmt.date(d), onclick: () => goto(d, 'day') },
+        d.getDate() === 1 ? (lang.isEn ? `${MONTHS_SHORT_EN[d.getMonth()]} 1` : `${d.getMonth() + 1}月1日`) : d.getDate())));
       const placed = evs.filter((ev) => ev.s < we && (ev.e > ws || (+ev.e === +ev.s && ev.s >= ws))).sort(order)
         .map((ev) => ({ ev, a: Math.max(0, dayDiff(ws, ev.s)), b: Math.min(6, dayDiff(ws, lastDay(ev))) }));
       lanes(placed);
@@ -368,7 +395,7 @@ export default {
       for (let c = 0; c < 7; c++) {
         const n = count[c] - shown[c];
         if (n > 0) {
-          layer.append(h('button', { type: 'button', class: 'mv-more', style: { gridColumn: `${c + 1}`, gridRow: `${limit(c) + 1}` }, onclick: (e) => dayPopover(e.currentTarget, days[c]) }, `还有 ${n} 项`));
+          layer.append(h('button', { type: 'button', class: 'mv-more', style: { gridColumn: `${c + 1}`, gridRow: `${limit(c) + 1}` }, onclick: (e) => dayPopover(e.currentTarget, days[c]) }, tx(`还有 ${n} 项`, `+${n} more`)));
         }
       }
       const row = h('div', { class: 'mv-week' }, h('div', { class: 'mv-cells' }, cells), layer);
@@ -394,7 +421,7 @@ export default {
       const it = h('div', {
         class: `mv-ev ${isB ? 'ev-bar' : 'ev-pt'}${ev.s < ws ? ' cont-l' : ''}${lastDay(ev) > addDays(ws, 6) ? ' cont-r' : ''}${S.sel === ev.guid ? ' sel' : ''}`,
         style: { gridColumn: `${a + 1} / ${b + 2}`, gridRow: `${lane + 1}`, '--c': colorOf(ev) },
-        tabindex: '0', draggable: editable, dataset: { guid: ev.guid }, title: `${ev.title || '（无标题）'}\n${whenText(ev)}`,
+        tabindex: '0', draggable: editable, dataset: { guid: ev.guid }, title: `${ev.title || untitled()}\n${whenText(ev)}`,
         onclick: (e) => { e.stopPropagation(); showEvent(ev, it); },
         ondblclick: (e) => e.stopPropagation(),
         onkeydown: (e) => keyOnEvent(e, ev, it),
@@ -409,7 +436,7 @@ export default {
         ondragend: () => { it.classList.remove('dragging'); S.drag = null; },
       },
       isB ? null : h('span', { class: 'dotc' }),
-      h('span', { class: 't' }, ev.title || '（无标题）'),
+      h('span', { class: 't' }, ev.title || untitled()),
       !isB ? h('span', { class: 'tm' }, fmt.time(ev.s)) : null);
       return it;
     }
@@ -418,8 +445,8 @@ export default {
       const list = eventsOn(d);
       const p = popover(at, h('div', { class: 'cal-daypop' },
         h('div', { class: 'cal-daypop-head' },
-          h('div', {}, h('b', {}, md(d)), h('span', {}, wd(d))),
-          iconBtn('calendar-days', '打开日视图', () => { p.close(); goto(d, 'day'); }, { size: 'sm' })),
+          h('div', {}, h('b', {}, md(d)), h('span', {}, ` ${wd(d)}`)),
+          iconBtn('calendar-days', tx('打开日视图', 'Open Day View'), () => { p.close(); goto(d, 'day'); }, { size: 'sm' })),
         h('div', { class: 'ag-list' }, list.map((ev) => agendaRow(ev, d, (row) => { p.close(); showEvent(ev, at, row); })))),
       { width: '280px' });
     }
@@ -432,13 +459,13 @@ export default {
       const list = eventsOn(S.cursor, evs);
       clear(viewEl, h('div', { class: 'mvc' },
         h('div', { class: 'mvc-grid' },
-          WD.map((w, i) => h('span', { class: `wd${i > 4 ? ' we' : ''}` }, w)),
+          (lang.isEn ? WD_MINI_EN : WD_ZH).map((w, i) => h('span', { class: `wd${i > 4 ? ' we' : ''}` }, w)),
           [...Array(n)].map((_, i) => {
             const d = addDays(s, i);
             const dots = eventsOn(d, evs).slice(0, 3);
             return h('button', {
               type: 'button',
-              class: `mvc-d${d.getMonth() !== S.cursor.getMonth() ? ' out' : ''}${same(d, today) ? ' today' : ''}${same(d, S.cursor) ? ' sel' : ''}`,
+              class: `mvc-d${d.getMonth() !== S.cursor.getMonth() ? ' out' : ''}${same(d, today) && ' today' || ''}${same(d, S.cursor) ? ' sel' : ''}`,
               onclick: () => { const m = d.getMonth() !== S.cursor.getMonth(); S.cursor = d; S.mini = null; m ? update() : render(); },
               ondblclick: () => newAt(startOn(d)),
             }, h('span', { class: 'n' }, d.getDate()), h('span', { class: 'dots' }, dots.map((ev) => h('i', { style: { '--c': colorOf(ev) } }))));
@@ -448,21 +475,25 @@ export default {
             h('div', {}, h('b', {}, relDay(S.cursor)), h('span', {}, `${fmt.date(S.cursor)} ${wd(S.cursor)}`))),
           !loaded() ? skeleton(2, { avatar: false })
             : list.length ? h('div', { class: 'ag-list' }, list.map((ev) => agendaRow(ev, S.cursor)))
-              : h('div', { class: 'ag-none' }, '无日程', btn('添加', { kind: 'plain', size: 'sm', icon: 'plus', onclick: () => newAt(startOn(S.cursor)) })))));
+              : h('div', { class: 'ag-none' }, tx('无日程', 'No Events'), btn(tx('添加', 'Add'), { kind: 'plain', size: 'sm', icon: 'plus', onclick: () => newAt(startOn(S.cursor)) })))));
     }
 
     // ----------------------------------------------------------- list view
     function relDay(d) {
       const n = dayDiff(new Date(), d);
-      return n === 0 ? '今天' : n === 1 ? '明天' : n === 2 ? '后天' : n === -1 ? '昨天' : wd(d);
+      if (n === 0) return tx('今天', 'Today');
+      if (n === 1) return tx('明天', 'Tomorrow');
+      if (n === 2 && !lang.isEn) return '后天';
+      if (n === -1) return tx('昨天', 'Yesterday');
+      return wd(d);
     }
     function agendaTime(ev, d) {
-      if (ev.all_day) return [h('span', {}, '全天')];
+      if (ev.all_day) return [h('span', {}, tx('全天', 'All day'))];
       const st = same(ev.s, d); const en = same(lastDay(ev), d);
       if (st && en) return [h('span', {}, fmt.time(ev.s)), h('span', { class: 'end' }, fmt.time(ev.e))];
-      if (st) return [h('span', {}, fmt.time(ev.s)), h('span', { class: 'end' }, '开始')];
-      if (en) return [h('span', {}, '截至'), h('span', { class: 'end' }, fmt.time(ev.e))];
-      return [h('span', {}, '全天')];
+      if (st) return [h('span', {}, fmt.time(ev.s)), h('span', { class: 'end' }, tx('开始', 'Starts'))];
+      if (en) return [h('span', {}, tx('截至', 'Ends')), h('span', { class: 'end' }, fmt.time(ev.e))];
+      return [h('span', {}, tx('全天', 'All day'))];
     }
     function agendaRow(ev, d, onOpen) {
       const row = h('div', {
@@ -474,7 +505,7 @@ export default {
       h('div', { class: 'ag-time' }, agendaTime(ev, d)),
       h('span', { class: 'ag-bar' }),
       h('div', { class: 'ag-main' },
-        h('div', { class: 't' }, ev.title || '（无标题）', ev.recurring ? icon('repeat', { size: 'sm', cls: 'rep' }) : null),
+        h('div', { class: 't' }, ev.title || untitled(), ev.recurring ? icon('repeat', { size: 'sm', cls: 'rep' }) : null),
         ev.location ? h('div', { class: 'loc' }, icon('map-pin', { size: 'sm' }), h('span', {}, ev.location)) : null));
       return row;
     }
@@ -489,13 +520,17 @@ export default {
         if (!list.length) continue;
         out.push(h('section', { class: `ag-day${same(d, today) ? ' today' : ''}` },
           h('div', { class: 'ag-day-head' }, h('span', { class: 'n' }, d.getDate()),
-            h('div', {}, h('b', {}, relDay(d)), h('span', {}, `${d.getFullYear()}年${md(d)} ${wd(d)}`))),
+            h('div', {}, h('b', {}, relDay(d)), h('span', {}, `${fmt.date(d)} ${wd(d)}`))),
           h('div', { class: 'ag-list' }, list.map((ev) => agendaRow(ev, d)))));
       }
       clear(viewEl, h('div', { class: 'ag' },
         !loaded() ? skeleton(6, { avatar: false })
           : out.length ? out
-            : empty({ icon: 'calendar-check', title: '没有日程', text: `${md(s)}起 5 周内没有安排。`, action: { label: '新建日程', icon: 'plus', onClick: () => newAt() } })));
+            : empty({
+              icon: 'calendar-check', title: tx('没有日程', 'No Events'),
+              text: tx(`${md(s)}起 5 周内没有安排。`, `No events scheduled for the 5 weeks starting ${md(s)}.`),
+              action: { label: tx('新建日程', 'New Event'), icon: 'plus', onClick: () => newAt() },
+            })));
     }
 
     // ---------------------------------------------------- day / week grid
@@ -518,10 +553,10 @@ export default {
         const it = h('div', {
           class: `mv-ev ev-bar${p.ev.s < d0 ? ' cont-l' : ''}${lastDay(p.ev) >= d1 ? ' cont-r' : ''}${S.sel === p.ev.guid ? ' sel' : ''}`,
           style: { gridColumn: `${p.a + 1} / ${p.b + 2}`, gridRow: `${p.lane + 1}`, '--c': colorOf(p.ev) },
-          tabindex: '0', dataset: { guid: p.ev.guid }, title: `${p.ev.title || '（无标题）'}\n${whenText(p.ev)}`,
+          tabindex: '0', dataset: { guid: p.ev.guid }, title: `${p.ev.title || untitled()}\n${whenText(p.ev)}`,
           onclick: () => showEvent(p.ev, it), onkeydown: (e) => keyOnEvent(e, p.ev, it), oncontextmenu: (e) => eventMenu(e, p.ev),
           'aria-disabled': editable ? undefined : 'true',
-        }, h('span', { class: 't' }, p.ev.title || '（无标题）'));
+        }, h('span', { class: 't' }, p.ev.title || untitled()));
         return it;
       }));
 
@@ -544,7 +579,7 @@ export default {
       const grid = h('div', { class: 'tg-grid', style: { height: `${HOUR * 24}px` } }, hours, cols);
       const scroll = h('div', { class: 'tg-scroll', dataset: { n: String(n) } }, grid);
       const root = h('div', { class: `tg ${n === 1 ? 'tg-1' : 'tg-7'}`, style: { '--cols': n } },
-        head, h('div', { class: 'tg-allday' }, h('div', { class: 'tg-gutter' }, '全天'), allGrid), scroll);
+        head, h('div', { class: 'tg-allday' }, h('div', { class: 'tg-gutter' }, tx('全天', 'all-day')), allGrid), scroll);
       clear(viewEl, root);
       root.style.setProperty('--sbw', `${scroll.offsetWidth - scroll.clientWidth}px`);
       if (keep !== null) scroll.scrollTop = keep;
@@ -567,11 +602,11 @@ export default {
         class: `tg-ev${short ? ' short' : ''}${S.sel === ev.guid ? ' sel' : ''}${editable ? ' editable' : ''}`,
         tabindex: '0', dataset: { guid: ev.guid },
         style: { top: `${(a / 60) * HOUR}px`, height: `${height - 2}px`, left: `calc(${(ci / cols) * 100}% + 1px)`, width: `calc(${100 / cols}% - 3px)`, '--c': colorOf(ev) },
-        title: `${ev.title || '（无标题）'}\n${whenText(ev)}${ev.location ? `\n${ev.location}` : ''}`,
+        title: `${ev.title || untitled()}\n${whenText(ev)}${ev.location ? `\n${ev.location}` : ''}`,
         onkeydown: (e) => keyOnEvent(e, ev, it),
         oncontextmenu: (e) => eventMenu(e, ev),
       },
-      h('div', { class: 't' }, ev.title || '（无标题）', short ? h('span', { class: 'tm' }, fmt.time(ev.s)) : null),
+      h('div', { class: 't' }, ev.title || untitled(), short ? h('span', { class: 'tm' }, fmt.time(ev.s)) : null),
       short ? null : h('div', { class: 'tm' }, `${fmt.time(ev.s)} – ${fmt.time(ev.e)}`),
       !short && ev.location && height > 60 ? h('div', { class: 'loc' }, ev.location) : null,
       editable ? h('div', { class: 'tg-resize' }) : null);
@@ -651,7 +686,7 @@ export default {
           let ghost = null;
           const mkGhost = () => {
             ghost = h('div', { class: 'tg-ev ghost', style: { left: '1px', width: 'calc(100% - 3px)', '--c': colorOf({ pguid: defaultCal() }) } },
-              h('div', { class: 't' }, '新建日程'), h('div', { class: 'tm' }));
+              h('div', { class: 't' }, tx('新建日程', 'New Event')), h('div', { class: 'tm' }));
             col.append(ghost);
           };
           onMove = (m) => {
@@ -694,26 +729,28 @@ export default {
       const row = (ic, ...content) => h('div', { class: 'evp-row' }, icon(ic, { size: 'sm' }), h('div', { class: 'evp-v' }, content));
       const rows = h('div', { class: 'evp-rows' },
         row('clock', whenText(ev)),
-        row('calendar', h('span', { class: 'evp-cal' }, h('span', { class: 'dot sm', style: { '--c': colorOf(ev) } }), cal?.title || '日历')),
-        ev.recurring ? row('repeat', '重复日程') : null,
-        ev.alarms?.length ? row('bell', `${ev.alarms.length} 个提醒`) : null,
+        row('calendar', h('span', { class: 'evp-cal' }, h('span', { class: 'dot sm', style: { '--c': colorOf(ev) } }), cal?.title || tx('日历', 'Calendar'))),
+        ev.recurring ? row('repeat', tx('重复日程', 'Repeating event')) : null,
+        ev.alarms?.length ? row('bell', countText(ev.alarms.length, '个提醒', 'alert')) : null,
         ev.url ? row('link', h('a', { href: ev.url, onclick: (x) => { x.preventDefault(); shell.openExternal(ev.url); } }, ev.url)) : null,
         ev.description ? h('div', { class: 'evp-notes selectable' }, ev.description) : null);
       const content = h('div', { class: 'evp', style: { '--c': colorOf(ev) } },
         h('div', { class: 'evp-head' },
           h('span', { class: 'evp-bar' }),
           h('div', { class: 'evp-title' },
-            h('h3', { class: 'selectable' }, ev.title || '（无标题）'),
+            h('h3', { class: 'selectable' }, ev.title || untitled()),
             ev.location ? h('a', {
-              class: 'evp-loc', href: '#', 'data-tip': '在地图中查看',
+              class: 'evp-loc', href: '#', 'data-tip': tx('在地图中查看', 'Open in Maps'),
               onclick: (x) => { x.preventDefault(); shell.openExternal(`https://www.bing.com/maps?q=${encodeURIComponent(ev.location)}`); },
             }, icon('map-pin', { size: 'sm' }), ev.location) : null),
           h('div', { class: 'evp-tools' },
-            editable ? iconBtn('pencil', '编辑 (Enter)', () => { p.close(); editEvent(ev); }, { size: 'sm' }) : null,
-            iconBtn('ellipsis', '更多', (x) => eventMenu(x.currentTarget, ev, () => p.close()), { size: 'sm' }))),
+            editable ? iconBtn('pencil', tx('编辑 (Enter)', 'Edit (Enter)'), () => { p.close(); editEvent(ev); }, { size: 'sm' }) : null,
+            iconBtn('ellipsis', tx('更多', 'More'), (x) => eventMenu(x.currentTarget, ev, () => p.close()), { size: 'sm' }))),
         rows,
         !editable ? h('div', { class: 'evp-note' }, icon('lock', { size: 'sm' }),
-          ev.recurring ? '重复日程暂不支持在此修改，请在 Apple 设备上编辑。' : '此日程所在日历为只读。') : null);
+          ev.recurring
+            ? tx('重复日程暂不支持在此修改，请在 Apple 设备上编辑。', 'Repeating events cannot be edited here yet. Edit on your Apple device.')
+            : tx('此日程所在日历为只读。', 'This calendar is read-only.')) : null);
       const onKey = (k) => {
         if (isTyping(k) || document.querySelector('.overlay,.menu')) return;
         if (k.key === 'Enter' && editable) { k.preventDefault(); p.close(); editEvent(ev); }
@@ -727,7 +764,7 @@ export default {
       // Invitees only come with the detail call.
       get(`/api/calendar/events/${enc(ev.pguid)}/${enc(ev.guid)}`).then((d) => {
         const people = (d?.invitees || []).map((i) => i.commonName || String(i.email || '').replace(/^mailto:/i, '')).filter(Boolean);
-        if (people.length && content.isConnected) { rows.insertBefore(row('users', people.join('、')), rows.querySelector('.evp-notes')); p.reposition(); }
+        if (people.length && content.isConnected) { rows.insertBefore(row('users', people.join(lang.isEn ? ', ' : '、')), rows.querySelector('.evp-notes')); p.reposition(); }
       }).catch(() => {});
     }
 
@@ -735,17 +772,17 @@ export default {
       const editable = canEdit(ev);
       const node = at instanceof Event ? at.target.closest('[data-guid]') : at;
       menu(at, [
-        { label: '查看详情', icon: 'info', onClick: () => showEvent(ev, node) },
-        { label: '编辑…', icon: 'pencil', disabled: !editable, onClick: () => { closePop?.(); editEvent(ev); } },
-        { label: '复制为新日程…', icon: 'copy', onClick: () => { closePop?.(); editEvent(ev, { duplicate: true }); } },
-        { label: '拷贝标题与时间', icon: 'clipboard', onClick: () => navigator.clipboard?.writeText(`${ev.title}\n${whenText(ev)}${ev.location ? `\n${ev.location}` : ''}`).then(() => toast('已拷贝', 'success')) },
-        ...(editable && writable().length > 1 ? ['-', { section: '移到日历' },
+        { label: tx('查看详情', 'Show Info'), icon: 'info', onClick: () => showEvent(ev, node) },
+        { label: tx('编辑…', 'Edit…'), icon: 'pencil', disabled: !editable, onClick: () => { closePop?.(); editEvent(ev); } },
+        { label: tx('复制为新日程…', 'Duplicate…'), icon: 'copy', onClick: () => { closePop?.(); editEvent(ev, { duplicate: true }); } },
+        { label: tx('拷贝标题与时间', 'Copy Summary'), icon: 'clipboard', onClick: () => navigator.clipboard?.writeText(`${ev.title}\n${whenText(ev)}${ev.location ? `\n${ev.location}` : ''}`).then(() => toast(tx('已拷贝', 'Copied'), 'success')) },
+        ...(editable && writable().length > 1 ? ['-', { section: tx('移到日历', 'Calendar') },
           ...writable().map((c) => ({
             label: c.title, dot: c.color, disabled: c.guid === ev.pguid,
             onClick: () => { closePop?.(); saveTimes(ev, ev.s, ev.e, { pguid: c.guid }); },
           }))] : []),
         '-',
-        { label: '删除', icon: 'trash-2', danger: true, disabled: !editable, onClick: () => { closePop?.(); removeEvent(ev); } },
+        { label: tx('删除', 'Delete'), icon: 'trash-2', danger: true, disabled: !editable, onClick: () => { closePop?.(); removeEvent(ev); } },
       ]);
     }
 
@@ -774,9 +811,9 @@ export default {
       try {
         await put(`/api/calendar/events/${enc(old.pguid)}/${enc(ev.guid)}`, body);
         const moved = extra.pguid && extra.pguid !== old.pguid;
-        toast(moved ? `已移到“${calOf(extra.pguid)?.title || '日历'}”` : `已改到 ${whenText(ev)}`, 'success', undoable && !moved ? {
+        toast(moved ? tx(`已移到“${calOf(extra.pguid)?.title || '日历'}”`, `Moved to “${calOf(extra.pguid)?.title || 'Calendar'}”`) : tx(`已改到 ${whenText(ev)}`, `Rescheduled to ${whenText(ev)}`), 'success', undoable && !moved ? {
           ms: 5000,
-          action: { label: '撤销', onClick: () => { const cur = findEv(ev.guid); if (cur) saveTimes(cur, old.s, old.e, {}, false); } },
+          action: { label: tx('撤销', 'Undo'), onClick: () => { const cur = findEv(ev.guid); if (cur) saveTimes(cur, old.s, old.e, {}, false); } },
         } : 2400);
       } catch (err) {
         Object.assign(ev, old);
@@ -786,11 +823,11 @@ export default {
     }
 
     async function removeEvent(ev) {
-      const ok = await confirmDialog(`删除“${ev.title || '无标题'}”？`, { title: '删除日程', okLabel: '删除', danger: true, icon: 'trash-2', detail: whenText(ev) });
+      const ok = await confirmDialog(tx(`删除“${ev.title || '无标题'}”？`, `Delete “${ev.title || 'Untitled'}”?`), { title: tx('删除日程', 'Delete Event'), okLabel: tx('删除', 'Delete'), danger: true, icon: 'trash-2', detail: whenText(ev) });
       if (!ok) return;
       try {
         await del(`/api/calendar/events/${enc(ev.pguid)}/${enc(ev.guid)}`, { etag: ev.etag });
-        toast('已删除日程', 'success');
+        toast(tx('已删除日程', 'Event deleted'), 'success');
       } catch (e) { toastError(e); }
       await refetch();
     }
@@ -811,28 +848,29 @@ export default {
 
     function editEvent(ev, o = {}) {
       const w = writable();
-      if (!S.cals) { toast('日历仍在加载…'); return; }
-      if (!w.length) { toast('没有可写入的日历', 'error'); return; }
+      if (!S.cals) { toast(tx('日历仍在加载…', 'Calendars are still loading…')); return; }
+      if (!w.length) { toast(tx('没有可写入的日历', 'No writable calendars available'), 'error'); return; }
       const isNew = !ev || o.duplicate;
       const src = ev || {};
       let allDay = o.all_day ?? src.all_day ?? false;
       let s = o.start || src.s; let e = o.end || src.e || addMin(s, allDay ? 1440 : 60);
       if (allDay) { s = sod(s); if (e <= s) e = addDays(s, 1); }
 
-      const titleIn = h('input', { class: 'input ev-title-in', value: o.duplicate ? `${src.title || ''}` : (src.title || ''), placeholder: '新建日程', autofocus: true, spellcheck: false });
-      const locIn = h('input', { class: 'input ev-loc-in', value: src.location || '', placeholder: '添加地点或视频通话', spellcheck: false });
-      const descIn = h('textarea', { class: 'textarea ev-notes-in', rows: 3, placeholder: '添加备注' });
+      const defaultTitle = tx('新建日程', 'New Event');
+      const titleIn = h('input', { class: 'input ev-title-in', value: o.duplicate ? `${src.title || ''}` : (src.title || ''), placeholder: defaultTitle, autofocus: true, spellcheck: false });
+      const locIn = h('input', { class: 'input ev-loc-in', value: src.location || '', placeholder: tx('添加地点或视频通话', 'Add location or video call'), spellcheck: false });
+      const descIn = h('textarea', { class: 'textarea ev-notes-in', rows: 3, placeholder: tx('添加备注', 'Add notes') });
       descIn.value = src.description || '';
-      const sDate = h('input', { class: 'input', type: 'date', 'aria-label': '开始日期' });
-      const sTime = h('input', { class: 'input', type: 'time', step: 300, 'aria-label': '开始时间' });
-      const eDate = h('input', { class: 'input', type: 'date', 'aria-label': '结束日期' });
-      const eTime = h('input', { class: 'input', type: 'time', step: 300, 'aria-label': '结束时间' });
+      const sDate = h('input', { class: 'input', type: 'date', 'aria-label': tx('开始日期', 'Start date') });
+      const sTime = h('input', { class: 'input', type: 'time', step: 300, 'aria-label': tx('开始时间', 'Start time') });
+      const eDate = h('input', { class: 'input', type: 'date', 'aria-label': tx('结束日期', 'End date') });
+      const eTime = h('input', { class: 'input', type: 'time', step: 300, 'aria-label': tx('结束时间', 'End time') });
       const dot = h('span', { class: 'ev-color' });
       const calSel = h('select', { class: 'select' }, w.map((c) => h('option', { value: c.guid }, c.title)));
       calSel.value = (o.pguid && w.some((c) => c.guid === o.pguid) && o.pguid) || (w.some((c) => c.guid === src.pguid) && src.pguid) || defaultCal();
       const paint = () => dot.style.setProperty('--c', calOf(calSel.value)?.color || 'var(--blue)');
       calSel.addEventListener('change', paint); paint();
-      const alarmSel = h('select', { class: 'select' }, ALARMS.map(([v, l]) => h('option', { value: String(v) }, l)));
+      const alarmSel = h('select', { class: 'select' }, alarmsList().map(([v, l]) => h('option', { value: String(v) }, l)));
       alarmSel.value = String(store.get('cal.alarm', -1));
       const durText = h('span', { class: 'ev-dur' });
 
@@ -853,8 +891,12 @@ export default {
         const ok = e > s;
         [eDate, eTime].forEach((x) => x.classList.toggle('invalid', !ok));
         const mins = Math.round((e - s) / 60000);
-        durText.textContent = !ok ? '结束早于开始' : allDay ? `${Math.round(mins / 1440)} 天`
-          : mins < 60 ? `${mins} 分钟` : mins % 60 ? `${Math.floor(mins / 60)} 小时 ${mins % 60} 分` : mins >= 1440 && mins % 1440 === 0 ? `${mins / 1440} 天` : `${mins / 60} 小时`;
+        if (!ok) durText.textContent = tx('结束早于开始', 'Ends before start');
+        else if (allDay) durText.textContent = countText(Math.round(mins / 1440), '天', 'day');
+        else if (mins < 60) durText.textContent = tx(`${mins} 分钟`, `${mins} min`);
+        else if (mins % 60) durText.textContent = tx(`${Math.floor(mins / 60)} 小时 ${mins % 60} 分`, `${Math.floor(mins / 60)}h ${mins % 60}m`);
+        else if (mins >= 1440 && mins % 1440 === 0) durText.textContent = countText(mins / 1440, '天', 'day');
+        else durText.textContent = countText(mins / 60, '小时', 'hour');
         durText.classList.toggle('bad', !ok);
         return ok;
       };
@@ -875,21 +917,21 @@ export default {
         h('div', { class: 'ev-head' }, dot, titleIn),
         h('label', { class: 'ev-loc' }, icon('map-pin'), locIn),
         h('div', { class: 'group' },
-          row('全天', allSw),
-          row('开始', h('div', { class: 'ev-dt' }, sDate, sTime)),
-          row('结束', h('div', { class: 'ev-dt' }, eDate, eTime)),
+          row(tx('全天', 'All-day'), allSw),
+          row(tx('开始', 'Starts'), h('div', { class: 'ev-dt' }, sDate, sTime)),
+          row(tx('结束', 'Ends'), h('div', { class: 'ev-dt' }, eDate, eTime)),
           h('div', { class: 'ev-dur-row' }, durText)),
         h('div', { class: 'group' },
-          row('日历', calSel),
-          isNew ? row('提醒', alarmSel) : null),
+          row(tx('日历', 'Calendar'), calSel),
+          isNew ? row(tx('提醒', 'Alert'), alarmSel) : null),
         h('label', { class: 'ev-notes' }, descIn));
       fill();
 
       const save = async () => {
-        if (!check()) { toast('结束时间必须晚于开始时间', 'error'); return false; }
+        if (!check()) { toast(tx('结束时间必须晚于开始时间', 'End time must be after start time'), 'error'); return false; }
         const alarm = Number(alarmSel.value);
         const body = payload(isNew ? {} : ev, {
-          title: titleIn.value.trim() || '新建日程', location: locIn.value.trim(), description: descIn.value,
+          title: titleIn.value.trim() || defaultTitle, location: locIn.value.trim(), description: descIn.value,
           pguid: calSel.value, start: s, end: e, all_day: allDay, alarm_minutes: isNew && alarm >= 0 ? alarm : null,
         });
         if (isNew) {
@@ -900,37 +942,37 @@ export default {
           await put(`/api/calendar/events/${enc(ev.pguid)}/${enc(ev.guid)}`, body);
         }
         if (S.hidden.has(body.pguid)) { S.hidden.delete(body.pguid); store.set('cal.hidden', [...S.hidden]); renderCals(); }
-        toast(isNew ? '已添加日程' : '已保存更改', 'success');
+        toast(isNew ? tx('已添加日程', 'Event added') : tx('已保存更改', 'Changes saved'), 'success');
         if (isNew && !(s >= fetchRange()[0] && s < fetchRange()[1])) goto(s);
         refetch();
       };
       modal({
-        title: isNew ? '新建日程' : '编辑日程',
+        title: isNew ? tx('新建日程', 'New Event') : tx('编辑日程', 'Edit Event'),
         body: form, cls: 'ev-modal', width: '460px', onClose: o.onClose,
         actions: [
-          !isNew ? { label: '删除', icon: 'trash-2', kind: 'danger-ghost', left: true, onClick: async ({ close }) => { close(); await removeEvent(ev); } } : null,
-          { label: '取消' },
-          { label: isNew ? '添加' : '保存', primary: true, onClick: save },
+          !isNew ? { label: tx('删除', 'Delete'), icon: 'trash-2', kind: 'danger-ghost', left: true, onClick: async ({ close }) => { close(); await removeEvent(ev); } } : null,
+          { label: tx('取消', 'Cancel') },
+          { label: isNew ? tx('添加', 'Add') : tx('保存', 'Save'), primary: true, onClick: save },
         ].filter(Boolean),
       });
     }
 
     // ---------------------------------------------------------- calendars
     function newCalendar() {
-      const name = h('input', { class: 'input', placeholder: '例如：健身、学习、旅行', autofocus: true });
+      const name = h('input', { class: 'input', placeholder: tx('例如：健身、学习、旅行', 'e.g. Fitness, Study, Travel'), autofocus: true });
       const sw = colorSwatches('#007aff');
       modal({
-        title: '新建日历', size: 'sm',
-        body: h('div', { class: 'form' }, field('名称', name), field('颜色', sw)),
+        title: tx('新建日历', 'New Calendar'), size: 'sm',
+        body: h('div', { class: 'form' }, field(tx('名称', 'Name'), name), field(tx('颜色', 'Color'), sw)),
         actions: [
-          { label: '取消' },
+          { label: tx('取消', 'Cancel') },
           {
-            label: '创建', primary: true,
+            label: tx('创建', 'Create'), primary: true,
             onClick: async () => {
               const t = name.value.trim();
               if (!t) { name.focus(); return false; }
               await post('/api/calendar/calendars', { title: t, color: sw.value });
-              toast(`已创建日历“${t}”`, 'success');
+              toast(tx(`已创建日历“${t}”`, `Created calendar “${t}”`), 'success');
               await loadCals();
             },
           },
@@ -938,9 +980,12 @@ export default {
       });
     }
     async function removeCalendar(c) {
-      const ok = await confirmDialog(`删除日历“${c.title}”？`, { title: '删除日历', okLabel: '删除', danger: true, icon: 'trash-2', detail: '日历中的所有日程都会从你的所有设备上删除，且无法恢复。' });
+      const ok = await confirmDialog(tx(`删除日历“${c.title}”？`, `Delete calendar “${c.title}”?`), {
+        title: tx('删除日历', 'Delete Calendar'), okLabel: tx('删除', 'Delete'), danger: true, icon: 'trash-2',
+        detail: tx('日历中的所有日程都会从你的所有设备上删除，且无法恢复。', 'All events in this calendar will be permanently deleted across all your devices.'),
+      });
       if (!ok) return;
-      try { await del(`/api/calendar/calendars/${enc(c.guid)}`); toast('已删除日历', 'success'); } catch (e) { toastError(e); }
+      try { await del(`/api/calendar/calendars/${enc(c.guid)}`); toast(tx('已删除日历', 'Calendar deleted'), 'success'); } catch (e) { toastError(e); }
       await reload();
     }
 
