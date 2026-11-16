@@ -8,7 +8,7 @@ iCloud Desk 是 Windows 上的 iCloud 桌面客户端，界面仿照 iCloud 网�
 
 ## 安装
 
-1. 运行 `dist\iCloudDesk-Setup-<版本>.exe`。按当前用户安装，不需要管理员权限。
+1. 从 [GitHub Releases](https://github.com/CanderFlower/icloud-desk/releases) 下载 `iCloudDesk-Setup-<版本>.exe`（或自行构建 `dist\iCloudDesk-Setup-<版本>.exe`）并运行。按当前用户安装，不需要管理员权限。
    - 安装位置：`%LOCALAPPDATA%\Programs\iCloud Desk`。
    - 会添加开始菜单快捷方式、卸载项，以及 App Paths 注册（`Win+R` 里输入 `iCloudDesk` 或 `icd` 都能启动）。
    - 默认勾选“把 `icd` 加入 PATH”。需要新开一个终端才会生效。
@@ -22,6 +22,12 @@ iCloud Desk 是 Windows 上的 iCloud 桌面客户端，界面仿照 iCloud 网�
 - 点关闭（或 Alt+F4）默认隐藏到系统托盘，不退出。右键托盘图标可以“退出”，或取消勾选“关闭窗口时隐藏到托盘”。
 - 全局快捷键 `Ctrl+Alt+R` 用来显示或隐藏窗口。如果这个快捷键已经被别的程序占用，托盘菜单里会显示“（被占用）”。
 - 再次启动程序（开始菜单或 `iCloudDesk`）会把已隐藏的窗口唤出来。
+
+### 本地缓存
+
+日历、提醒事项、备忘录列表和云盘目录会保留本地快照，切换页面、重新打开窗口时先显示缓存，不必每次等 Apple 返回数据。缓存超过一分钟会在后台同步；刷新按钮或 `F5` 始终读取最新数据，同步失败会提示并保留已有内容。
+
+缓存按 Apple 账户及中国大陆/国际区隔离，最多保留七天，写入后失效，退出登录会清除。缓存只用于查看，不会离线排队提交修改；备忘录正文仍从服务读取后才能编辑。首次访问未缓存的内容仍需联网加载。桌面窗口启动时也会直接复用已经运行的本地服务，避免重复启动命令行组件。
 
 ## 命令行（给 Agent 用）
 
@@ -108,6 +114,7 @@ run.bat                    :: 第一次运行会自动创建 .venv，然后在�
 run.bat --demo ui          :: 演示数据，不需要登录，适合改 UI
 run.bat --demo daemon restart   :: 改了 Python 后端后需要重启服务
 .venv\Scripts\python -m pytest
+node --test tests\cache.test.mjs  :: 本地快照、后台更新、账户隔离和写入失效测试
 ```
 
 前端改完直接刷新页面就能看到效果。
@@ -134,3 +141,9 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -SkipShell # 只重�
 - 通讯录目前只读。
 - 日历：重复日程和受邀日程只能查看。
 - 数据来自 [pyicloud](https://github.com/timlaing/pyicloud)。Apple 改接口时可能需要升级 pyicloud 并重新打包。
+
+## 开源协议与声明
+
+- 本项目基于 [MIT License](LICENSE) 开源。
+- 本项目为非官方第三方客户端，与 Apple Inc. 无关；iCloud 及相关服务名称、应用图标归 Apple Inc. 所有，界面通用图标来自 [Lucide](https://lucide.dev/)。
+

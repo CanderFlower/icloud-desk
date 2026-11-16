@@ -1,6 +1,24 @@
 // Thin fetch wrapper. Every module talks to the local daemon through api().
 // Auth: the daemon sets an HttpOnly cookie when the shell opens /?token=…, so
 // same-origin fetches are authenticated automatically.
+import { ResponseCache } from './cache.js';
+
+export const responseCache = new ResponseCache({
+  storage: {
+    getItem: (key) => window.localStorage.getItem(key),
+    setItem: (key, value) => window.localStorage.setItem(key, value),
+    removeItem: (key) => window.localStorage.removeItem(key),
+  },
+  notify: (detail) => window.dispatchEvent(new CustomEvent('cache-state', { detail })),
+});
+
+const cacheKey = (path, query) => {
+  const pairs = Object.entries(query || {}).filter(([, v]) => v !== undefined && v !== null && v !== '').sort(([a], [b]) => a.localeCompare(b));
+  return path + (pairs.length ? `?${new URLSearchParams(pairs)}` : '');
+};
+
+export const cachedGet = (path, query, options) => responseCache.read(cacheKey(path, query), () => get(path, query), options);
+export const peekCache = (path, query) => responseCache.peek(cacheKey(path, query));
 
 export class ApiError extends Error {
   constructor(message, status, data) {
@@ -11,6 +29,13 @@ export class ApiError extends Error {
 }
 
 export async function api(path, { method = 'GET', body, form, query, signal } = {}) {
+  if (!path.startsWith('/api/auth/') && responseCache.state === 'restoring') {
+    if (method !== 'GET') throw new ApiError('登录会话正在恢复，请稍后再修改', 409, null);
+    await responseCache.waitForSession();
+  }
+  const writing = method !== 'GET' && !path.startsWith('/api/auth/');
+  const family = path.split('/').slice(0, 3).join('/');
+  if (writing) responseCache.invalidate(family);
   let url = path;
   if (query) {
     const qs = new URLSearchParams();
@@ -43,6 +68,7 @@ export async function api(path, { method = 'GET', body, form, query, signal } = 
     if (res.status === 403 && data?.code === 'bad_token') connection.lost();
     throw new ApiError(typeof msg === 'string' ? msg : JSON.stringify(msg), res.status, data);
   }
+  if (writing) responseCache.invalidate(family);
   return data;
 }
 
@@ -54,6 +80,9 @@ export const del = (path, query) => api(path, { method: 'DELETE', query });
 
 /** Upload with progress. onProgress(0..1). Resolves parsed JSON. */
 export function upload(path, form, { onProgress, query } = {}) {
+  if (responseCache.state === 'restoring') return Promise.reject(new ApiError('登录会话正在恢复，请稍后再上传', 409, null));
+  const family = path.split('/').slice(0, 3).join('/');
+  responseCache.invalidate(family);
   return new Promise((resolve, reject) => {
     const qs = query ? `?${new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== null))}` : '';
     const xhr = new XMLHttpRequest();
@@ -61,7 +90,7 @@ export function upload(path, form, { onProgress, query } = {}) {
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
     xhr.onload = () => {
       let data = null; try { data = JSON.parse(xhr.responseText); } catch { data = xhr.responseText; }
-      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      if (xhr.status >= 200 && xhr.status < 300) { responseCache.invalidate(family); resolve(data); }
       else reject(new ApiError((data && (data.error || data.detail)) || `${xhr.status}`, xhr.status, data));
     };
     xhr.onerror = () => { connection.lost(); reject(new ApiError('无法连接本地服务', 0, null)); };

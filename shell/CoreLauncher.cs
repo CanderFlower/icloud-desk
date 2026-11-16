@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -25,6 +27,10 @@ internal sealed class CoreLaunchException(string message, string? details = null
 internal static class CoreLauncher
 {
     private static readonly TimeSpan EnsureTimeout = TimeSpan.FromSeconds(60);
+    private static readonly HttpClient ProbeClient = new(new HttpClientHandler { UseProxy = false })
+    {
+        Timeout = TimeSpan.FromSeconds(1),
+    };
 
     public sealed record CoreCommand(string FileName, IReadOnlyList<string> PrefixArgs, string WorkingDirectory)
     {
@@ -52,6 +58,8 @@ internal static class CoreLauncher
 
     public static async Task<DaemonInfo> EnsureAsync(bool demo, CancellationToken ct)
     {
+        var existing = await TryReuseAsync(demo, ct);
+        if (existing is not null) return existing;
         var cmd = Locate() ?? throw new CoreLaunchException(
             "找不到 iCloud Desk 核心组件 (icd.exe)。",
             $"在 {AppContext.BaseDirectory} 中没有找到 icd.exe。请重新安装 iCloud Desk。");
@@ -148,6 +156,51 @@ internal static class CoreLauncher
         }
         Log.Info($"Daemon ready: pid={info.Pid} port={info.Port} demo={info.Demo} version={info.Version}");
         return info;
+    }
+
+    private static async Task<DaemonInfo?> TryReuseAsync(bool demo, CancellationToken ct)
+    {
+        var stateFile = Path.Combine(AppPaths.DataDir, demo ? "daemon-demo.json" : "daemon.json");
+        var tokenFile = Path.Combine(AppPaths.DataDir, "token");
+        if (!File.Exists(stateFile) || !File.Exists(tokenFile)) return null;
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var info = JsonSerializer.Deserialize<DaemonInfo>(await File.ReadAllTextAsync(stateFile, ct));
+            if (info is null || info.Port is < 1 or > 65535 || info.Demo != demo || info.Version != AppPaths.Version)
+                return null;
+            var token = (await File.ReadAllTextAsync(tokenFile, ct)).Trim();
+            if (token.Length < 32) return null;
+            var url = $"http://127.0.0.1:{info.Port}/";
+            using var request = new HttpRequestMessage(HttpMethod.Get, url + "api/ping");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using var response = await ProbeClient.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                Log.Info($"Existing daemon probe returned {(int)response.StatusCode}; running ensure");
+                return null;
+            }
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            var ping = JsonSerializer.Deserialize<DaemonInfo>(json.RootElement.GetRawText());
+            if (!json.RootElement.TryGetProperty("app", out var app) || app.GetString() != "icloud-desk" ||
+                ping is null || ping.Pid != info.Pid || ping.Demo != demo || ping.Version != info.Version)
+                return null;
+            info.Url = url;
+            info.Token = token;
+            info.UiUrl = url + "?token=" + Uri.EscapeDataString(token);
+            Log.Info($"Reused daemon: pid={info.Pid} port={info.Port} in {sw.ElapsedMilliseconds} ms");
+            return info;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or HttpRequestException)
+        {
+            Log.Info($"Existing daemon unavailable ({ex.GetType().Name}); running ensure");
+            return null;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            Log.Info("Existing daemon probe timed out; running ensure");
+            return null;
+        }
     }
 
     public static bool IsLoopback(string? url) =>

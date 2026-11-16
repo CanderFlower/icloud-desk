@@ -1,5 +1,5 @@
 // Reminders — smart lists (今天/计划/全部/旗标/已完成) + user lists, inline editing.
-import { get, post, patch, del, enc } from '../api.js';
+import { cachedGet, peekCache, post, patch, del, enc } from '../api.js';
 import {
   h, clear, icon, iconBtn, btn, toolbar, segmented, searchBox, switchEl, field, menu, popover,
   toast, toastError, confirmDialog, empty, skeleton, errorBox, fmt, toDate, store, isTyping,
@@ -38,7 +38,7 @@ export default {
   app: 'reminders',
   mount(el) {
     const S = {
-      lists: [],
+      lists: (peekCache('/api/reminders/lists') || []).filter((l) => !l.is_group),
       open: new Map(), // listId -> reminders (incomplete)
       done: new Map(), // listId -> reminders (completed), lazy
       sel: store.get('rem.sel', { type: 'smart', id: 'today' }),
@@ -46,6 +46,8 @@ export default {
       query: '',
       focusId: null,
     };
+    let alive = true;
+    let loadSeq = 0;
 
     let tb_done;
     const sideBody = h('div', { class: 'pane-body' });
@@ -55,7 +57,7 @@ export default {
       right: [
         iconBtn('list', '切换列表', (e) => switchMenu(e.currentTarget), { cls: 'when-side-hidden' }),
         h('span', { ref: (x) => { tb_done = x; } }),
-        iconBtn('refresh-cw', '刷新 (F5)', () => reload(), { cls: 'refresh' }),
+        iconBtn('refresh-cw', '刷新 (F5)', () => reload({ quiet: true, force: true }), { cls: 'refresh' }),
         h('button', { class: 'btn primary sm', type: 'button', dataset: { new: '' }, onclick: () => focusNewRow() }, icon('plus'), '新提醒事项'),
       ],
     });
@@ -72,26 +74,45 @@ export default {
     const allOpen = () => [...S.open.values()].flat();
     const allDone = () => [...S.done.values()].flat();
 
-    async function reload({ quiet } = {}) {
-      if (!quiet) { clear(sideBody, skeleton(5, { avatar: true })); clear(listBody, skeleton(7)); }
+    async function reload({ quiet = false, force = false } = {}) {
+      const seq = ++loadSeq;
+      if (!quiet && !S.lists.length) { clear(sideBody, skeleton(5, { avatar: true })); clear(listBody, skeleton(7)); }
       try {
-        S.lists = (await get('/api/reminders/lists')).filter((l) => !l.is_group);
-        const res = await Promise.all(S.lists.map((l) => get('/api/reminders', { list_id: l.id }).catch(() => [])));
+        const lists = await cachedGet('/api/reminders/lists', undefined, {
+          force, onUpdate: () => { if (alive && seq === loadSeq) reload({ quiet: true }); },
+        });
+        if (!alive || seq !== loadSeq) return;
+        S.lists = lists.filter((l) => !l.is_group);
+        const res = await Promise.all(S.lists.map((l) => cachedGet('/api/reminders', { list_id: l.id }, {
+          force, onUpdate: (rows) => {
+            if (!alive || seq !== loadSeq) return;
+            S.open.set(l.id, rows); renderSide(); renderMain();
+          },
+        })));
+        if (!alive || seq !== loadSeq) return;
         S.open = new Map(S.lists.map((l, i) => [l.id, res[i]]));
         S.done = new Map();
         if (S.sel.type === 'list' && !listById(S.sel.id)) S.sel = { type: 'smart', id: 'today' };
-        if (needDone()) await loadDone();
+        if (needDone()) await loadDone(force);
         renderSide(); renderMain();
       } catch (e) {
-        clear(listBody, errorBox(e)); clear(sideBody);
+        if (!alive || seq !== loadSeq) return;
+        if (S.open.size) toastError(e);
+        else { clear(listBody, errorBox(e)); clear(sideBody); }
       }
     }
 
     function needDone() { return S.sel.id === 'completed' || (S.sel.type === 'list' && S.showDone); }
-    async function loadDone() {
+    async function loadDone(force = false) {
       const ids = S.sel.type === 'list' ? [S.sel.id] : S.lists.map((l) => l.id);
       await Promise.all(ids.filter((id) => !S.done.has(id)).map(async (id) => {
-        const rows = await get('/api/reminders', { list_id: id, include_completed: true }).catch(() => []);
+        const rows = await cachedGet('/api/reminders', { list_id: id, include_completed: true }, {
+          force, onUpdate: (updated) => {
+            if (!alive) return;
+            S.done.set(id, updated.filter((r) => r.completed)); renderMain();
+          },
+        });
+        if (!alive) return;
         S.done.set(id, rows.filter((r) => r.completed));
       }));
     }
@@ -137,7 +158,7 @@ export default {
     function select(sel) {
       S.sel = sel; store.set('rem.sel', sel); S.focusId = null;
       renderSide();
-      if (needDone()) { clear(listBody, skeleton(5)); loadDone().then(renderMain); } else renderMain();
+      if (needDone()) { clear(listBody, skeleton(5)); loadDone().then(renderMain).catch(toastError); } else renderMain();
     }
 
     function switchMenu(anchor) {
@@ -408,7 +429,15 @@ export default {
       if (e.key === 'Enter' && !e.ctrlKey) { e.preventDefault(); focusNewRow(); }
     };
     document.addEventListener('keydown', onKey);
+    for (const l of S.lists) {
+      const rows = peekCache('/api/reminders', { list_id: l.id });
+      if (rows) S.open.set(l.id, rows);
+      const done = peekCache('/api/reminders', { list_id: l.id, include_completed: true });
+      if (done) S.done.set(l.id, done.filter((r) => r.completed));
+    }
+    if (S.sel.type === 'list' && !listById(S.sel.id)) S.sel = { type: 'smart', id: 'today' };
+    if (S.lists.length) { renderSide(); renderMain(); }
     reload();
-    return () => document.removeEventListener('keydown', onKey);
+    return () => { alive = false; loadSeq++; document.removeEventListener('keydown', onKey); };
   },
 };

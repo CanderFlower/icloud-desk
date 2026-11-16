@@ -1,6 +1,6 @@
 // Notes — folder tree, date-grouped list and a block editor that round-trips the
 // backend's markdown dialect (see app/notes_text.py): one block per paragraph.
-import { get, post, patch, del, enc } from '../api.js';
+import { get, cachedGet, peekCache, post, patch, del, enc } from '../api.js';
 import {
   h, clear, icon, iconBtn, btn, toolbar, searchBox, menu, toast, toastError, confirmDialog, promptDialog,
   empty, skeleton, errorBox, toDate, store, copyText, download, shell,
@@ -707,7 +707,7 @@ export default {
   app: 'notes',
   mount(el) {
     const S = {
-      folders: [],
+      folders: peekCache('/api/notes/folders') || [],
       notes: [],
       sel: store.get('notes.sel', ALL),
       curId: null,
@@ -843,9 +843,15 @@ export default {
       ]);
     }
 
-    async function loadFolders() {
+    async function loadFolders(force = false) {
+      const apply = (folders) => {
+        if (!alive) return;
+        S.folders = folders;
+        if (S.sel !== ALL && !folderById(S.sel)) S.sel = ALL;
+        renderSide();
+      };
       try {
-        S.folders = await get('/api/notes/folders');
+        apply(await cachedGet('/api/notes/folders', undefined, { force, onUpdate: apply }));
       } catch (e) {
         if (!S.folders.length) { clear(sideBody); sideBody.append(errorBox(e)); }
         throw e;
@@ -920,20 +926,27 @@ export default {
     }
 
     // ---- list
-    async function loadList({ openFirst = false, keep = false } = {}) {
+    async function loadList({ openFirst = false, keep = false, force = false } = {}) {
       const seq = ++listSeq;
-      listTb.setTitle(folderName(S.sel));
-      if (!keep) { S.loadingList = true; clear(listBody); listBody.append(skeleton(6, { avatar: false })); }
-      try {
-        const rows = await get('/api/notes', S.sel === ALL ? { limit: 1000 } : { folder_id: S.sel, limit: 1000 });
+      const query = S.sel === ALL ? { limit: 1000 } : { folder_id: S.sel, limit: 1000 };
+      const apply = (rows) => {
         if (seq !== listSeq || !alive) return;
-        S.notes = (rows || []).filter((n) => (S.sel === TRASH ? true : !n.is_deleted && n.folder_id !== TRASH));
+        S.notes = rows.filter((n) => (S.sel === TRASH ? true : !n.is_deleted && n.folder_id !== TRASH));
         S.notes.sort((a, b) => (toDate(b.modified_at)?.getTime() || 0) - (toDate(a.modified_at)?.getTime() || 0));
-        S.listError = null;
+        S.listError = null; S.loadingList = false;
+        renderList();
+      };
+      listTb.setTitle(folderName(S.sel));
+      const snapshot = !force && peekCache('/api/notes', query);
+      if (snapshot) apply(snapshot);
+      else if (!keep) { S.loadingList = true; clear(listBody); listBody.append(skeleton(6, { avatar: false })); }
+      try {
+        apply(await cachedGet('/api/notes', query, { force, onUpdate: apply }));
       } catch (e) {
-        if (seq !== listSeq) return;
-        S.listError = e;
+        if (seq !== listSeq || !alive) return;
+        if (S.notes.length) toastError(e); else S.listError = e;
       }
+      if (seq !== listSeq || !alive) return;
       S.loadingList = false;
       renderList();
       if (openFirst || (!ED && !S.curId)) {
@@ -1439,8 +1452,8 @@ export default {
     // ---- refresh / keyboard
     async function refresh() {
       await flush();
-      try { await loadFolders(); } catch (e) { toastError(e); return; }
-      await loadList({ keep: true });
+      try { await loadFolders(true); } catch (e) { toastError(e); return; }
+      await loadList({ keep: true, force: true });
       if (ED?.id && !ED.dirty) openNote(ED.id, { force: true, fromList: false });
     }
 

@@ -1,6 +1,6 @@
 // Calendar — day / week / month / list views, drag to create · move · resize,
 // event popover + editor, calendar visibility and management.
-import { get, post, put, del, enc } from '../api.js';
+import { get, cachedGet, peekCache, post, put, del, enc } from '../api.js';
 import {
   h, clear, icon, iconBtn, btn, toolbar, segmented, switchEl, field, menu, popover, modal, confirmDialog,
   toast, toastError, errorBox, empty, skeleton, colorSwatches, fmt, toDate, store, isTyping, shell,
@@ -101,7 +101,7 @@ export default {
       view: store.get('cal.view', 'month'),
       cursor: sod(new Date()),
       mini: null,
-      cals: null,
+      cals: peekCache('/api/calendar/calendars') || null,
       calError: null,
       hidden: new Set(store.get('cal.hidden', [])),
       cache: new Map(),
@@ -170,29 +170,43 @@ export default {
 
     async function ensure(force = false) {
       const r = fetchRange(); const key = keyOf(r);
-      if (!force && S.cache.has(key)) return;
-      S.loading++; bar.classList.add('on');
-      try {
-        const list = await get('/api/calendar/events', { start: fmt.isoDate(r[0]), end: fmt.isoDate(r[1]) });
-        S.cache.set(key, (list || []).map(norm));
+      const query = { start: fmt.isoDate(r[0]), end: fmt.isoDate(r[1]) };
+      const snapshot = !force && peekCache('/api/calendar/events', query);
+      if (snapshot) {
+        S.cache.set(key, snapshot.map(norm));
         if (!disposed && keyOf(fetchRange()) === key) render();
+      }
+      S.loading++; bar.classList.add('on');
+      const apply = (list) => {
+        if (disposed || list === undefined) return;
+        S.cache.set(key, list.map(norm));
+        if (keyOf(fetchRange()) === key) render();
+      };
+      try {
+        apply(await cachedGet('/api/calendar/events', query, { force, onUpdate: apply }));
       } catch (e) {
         if (!disposed) toastError(e);
       } finally {
         S.loading--; if (!S.loading) bar.classList.remove('on');
       }
     }
-    async function refetch() { S.cache.clear(); await ensure(true); }
-    async function loadCals() {
-      try {
-        S.cals = await get('/api/calendar/calendars');
+    async function refetch() { await ensure(true); }
+    async function loadCals(force = false) {
+      const apply = (cals) => {
+        if (disposed || cals === undefined) return;
+        S.cals = cals;
         S.calError = null;
+        renderCals(); render();
+      };
+      try {
+        apply(await cachedGet('/api/calendar/calendars', undefined, { force, onUpdate: apply }));
       } catch (e) {
-        S.calError = e; S.cals = S.cals || [];
+        if (S.cals) { toastError(e); return; }
+        S.calError = e; S.cals = [];
       }
       if (!disposed) { renderCals(); render(); }
     }
-    async function reload() { await Promise.all([loadCals(), refetch()]); }
+    async function reload() { await Promise.all([loadCals(true), refetch()]); }
 
     // ---------------------------------------------------------- navigation
     function setView(v) {
@@ -956,7 +970,13 @@ export default {
     const timer = setInterval(() => {
       if (fmt.isoDate(new Date()) !== today) { today = fmt.isoDate(new Date()); render(); } else positionNow();
     }, 30000);
+    const onVisible = () => { if (document.visibilityState === 'visible') { loadCals(); ensure(); } };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
 
+    const initialRange = fetchRange();
+    const initialEvents = peekCache('/api/calendar/events', { start: fmt.isoDate(initialRange[0]), end: fmt.isoDate(initialRange[1]) });
+    if (initialEvents) S.cache.set(keyOf(initialRange), initialEvents.map(norm));
     renderCals();
     render(true);
     loadCals();
@@ -965,6 +985,8 @@ export default {
     return () => {
       disposed = true;
       document.removeEventListener('keydown', onKey);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
       clearInterval(timer);
       ro.disconnect();
     };

@@ -1,5 +1,5 @@
 // App shell: boot, login / 2FA, sidebar navigation, routing, global shortcuts.
-import { get, post } from './api.js';
+import { get, post, responseCache } from './api.js';
 import {
   h, clear, icon, appIcon, btn, iconBtn, toast, toastError, confirmDialog, modal, menu,
   loadIcons, theme, shell, store, isTyping, copyText,
@@ -27,6 +27,22 @@ const MODULES = SECTIONS.flatMap((s) => s.modules);
 const root = document.getElementById('root');
 let status = null;
 let current = null; // { mod, cleanup }
+const cacheBar = h('div', { class: 'reconnect-bar', role: 'status', hidden: true });
+document.body.append(cacheBar);
+let cacheWarningShown = false;
+window.addEventListener('cache-state', ({ detail }) => {
+  if (detail.error) {
+    if (detail.storage) {
+      console.warn('Local response cache is unavailable', detail.error);
+      if (!cacheWarningShown) { cacheWarningShown = true; toast('无法保存本地缓存，本次仍可使用内存缓存', 'error'); }
+    } else if (detail.background) toast(`显示的是本地缓存，同步失败：${detail.error.message}`, 'error');
+    return;
+  }
+  const restoring = detail.state === 'restoring';
+  cacheBar.hidden = !restoring && !detail.pending;
+  clear(cacheBar, h('div', { class: 'spin' }), h('span', {},
+    restoring ? '正在恢复会话 · 已缓存的内容可先查看' : '正在同步最新内容…'));
+});
 
 // ------------------------------------------------------------------ boot
 async function boot() {
@@ -49,16 +65,27 @@ async function refreshStatus() {
       btn('重试', { kind: 'primary', icon: 'refresh-cw', onclick: refreshStatus })));
     return;
   }
+  responseCache.setSession(status);
   if (status.state === 'restoring') {
-    clear(root, h('div', { class: 'center-screen boot' },
-      h('img', { class: 'boot-logo', src: '/assets/apps/icloud.png', alt: '' }),
-      h('div', { class: 'row gap muted' }, h('div', { class: 'spin' }), '正在恢复登录会话…')));
+    if (responseCache.profile && responseCache.entries.size) {
+      status.user = responseCache.profile.user;
+      status.services = responseCache.profile.services;
+      if (!mainEl) renderApp();
+    } else {
+      clear(root, h('div', { class: 'center-screen boot' },
+        h('img', { class: 'boot-logo', src: '/assets/apps/icloud.png', alt: '' }),
+        h('div', { class: 'row gap muted' }, h('div', { class: 'spin' }), '正在恢复登录会话…')));
+    }
     setTimeout(refreshStatus, 700);
     return;
   }
-  if (status.state === 'ready') renderApp();
-  else if (status.state === 'needs_2fa') renderTwoFactor();
-  else renderLogin();
+  if (status.state === 'ready') { if (!mainEl) renderApp(); }
+  else {
+    if (typeof current?.cleanup === 'function') current.cleanup();
+    current = null; mainEl = null;
+    if (status.state === 'needs_2fa') renderTwoFactor();
+    else renderLogin();
+  }
 }
 
 // ----------------------------------------------------------------- login
@@ -105,6 +132,7 @@ function renderLogin() {
         status = await post('/api/auth/login', {
           apple_id: appleId.value.trim(), password: password.value, china_mainland: china.checked, remember: remember.checked,
         });
+        responseCache.setSession(status);
         if (status.state === 'needs_2fa') renderTwoFactor();
         else if (status.state === 'ready') renderApp();
         else msg.textContent = status.message || '登录失败';
@@ -153,6 +181,7 @@ function renderTwoFactor() {
     busy = true; verifyBtn.disabled = true; msg.textContent = '';
     try {
       status = await post('/api/auth/2fa/verify', { code: code() });
+      responseCache.setSession(status);
       toast('登录成功，此设备已被信任', 'success');
       renderApp();
     } catch (err) {
@@ -392,7 +421,8 @@ async function logout() {
   if (!ok) return;
   try {
     status = await post('/api/auth/logout', { forget_password: forget.checked });
-  } catch (e) { toastError(e); }
+    responseCache.setSession(status);
+  } catch (e) { toastError(e); return; }
   if (typeof current?.cleanup === 'function') current.cleanup();
   current = null; mainEl = null;
   history.replaceState(null, '', location.pathname);
@@ -430,6 +460,8 @@ window.addEventListener('themechange', () => {
 
 window.addEventListener('auth-required', async () => {
   try { status = await get('/api/auth/status'); } catch { return; }
+  responseCache.setSession(status);
+  if (status.state === 'restoring') return;
   if (status.state === 'ready') return;
   if (typeof current?.cleanup === 'function') current.cleanup();
   current = null; mainEl = null;

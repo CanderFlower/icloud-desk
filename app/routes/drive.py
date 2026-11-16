@@ -46,7 +46,15 @@ def _remember(data: dict[str, Any]) -> None:
 def _node_data(drivewsid: str) -> dict[str, Any]:
     data = _nodes().get(drivewsid)
     if data is None:
-        raise HTTPException(404, "找不到该文件，请刷新目录后重试")
+        # The UI can restore a cached directory before this daemon has seen it.
+        def _load(api: Any) -> dict[str, Any]:
+            node = api.drive.get_node_data(drivewsid)
+            _remember(node)
+            return node
+
+        data = run(_load)
+        if not data or data.get("drivewsid") != drivewsid:
+            raise HTTPException(404, "找不到该文件，请刷新目录后重试")
     return data
 
 

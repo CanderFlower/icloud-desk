@@ -2,7 +2,7 @@
 // Icon / list views, breadcrumbs, multi-select (Ctrl / Shift / keyboard), drag & drop upload
 // (onto the pane or a folder), drag-to-move, inline rename, quick look (Space), trash with undo,
 // app libraries, upload progress panel.
-import { get, post, upload as sendForm } from '../api.js';
+import { get, cachedGet, peekCache, post, upload as sendForm } from '../api.js';
 import {
   h, clear, icon, btn, iconBtn, segmented, searchBox, toast, toastError, empty, errorBox, modal,
   confirmDialog, promptDialog, menu, fmt, toDate, store, download, copyText, pickFiles, isTyping, spinner,
@@ -238,7 +238,7 @@ export default {
         t.push(iconBtn('download', files.length > 1 ? `下载 ${files.length} 个文件` : '下载', () => downloadSel(), { disabled: !files.length, cls: 'hide-narrow' }));
         if (writable()) t.push(iconBtn('trash-2', '删除 (Delete)', () => trashItems(selIds()), { disabled: !n }));
       }
-      const rf = iconBtn('refresh-cw', '刷新 (F5)', () => load({ keepSel: true }), { cls: 'hide-narrow' });
+      const rf = iconBtn('refresh-cw', '刷新 (F5)', () => load({ keepSel: true, force: true }), { cls: 'hide-narrow' });
       rf.dataset.refresh = '';
       t.push(h('span', { class: 'dv-tsep hide-narrow' }), viewSeg, rf, iconBtn('ellipsis', '更多', (e) => bgMenu(e.currentTarget)));
       clear(dynTools, t);
@@ -476,24 +476,35 @@ export default {
       downloadItem(it);
     }
 
-    async function load({ keepSel = false, select = null, names = null } = {}) {
+    async function load({ keepSel = false, select = null, names = null, force = false } = {}) {
       const my = ++seq;
+      const path = S.loc === 'trash' ? '/api/drive/trash' : S.loc === 'apps' && S.path.length === 1 ? '/api/drive/apps' : '/api/drive/list';
+      const query = path === '/api/drive/list' ? { id: cwd().id } : undefined;
+      const itemsOf = (data) => path === '/api/drive/apps' ? data : data.items;
+      const snapshot = !force && peekCache(path, query);
       store.set('drive.loc', S.loc); store.set('drive.path', S.path);
       if (!keepSel) { S.sel = new Set(); S.anchor = S.pivot = null; }
       S.error = null; S.loading = true;
+      if (snapshot) { S.items = itemsOf(snapshot); S.loading = false; }
       const slow = setTimeout(() => { if (my === seq && S.loading && !keepSel) { S.items = []; render(); } }, 220);
       render();
       try {
-        let items;
-        if (S.loc === 'trash') items = (await get('/api/drive/trash')).items;
-        else if (S.loc === 'apps' && S.path.length === 1) items = await get('/api/drive/apps');
-        else items = (await get('/api/drive/list', { id: cwd().id })).items;
+        const data = await cachedGet(path, query, {
+          force, onUpdate: (updated) => {
+            if (my !== seq || !alive) return;
+            S.items = itemsOf(updated);
+            const ids = new Set(S.items.map((i) => i.id));
+            S.sel = new Set([...S.sel].filter((id) => ids.has(id)));
+            render();
+          },
+        });
         if (my !== seq || !alive) return;
-        S.items = items || [];
+        S.items = itemsOf(data);
       } catch (e) {
         if (my !== seq || !alive) return;
         if (e.status === 404 && S.path.length > 1) { clearTimeout(slow); goLoc(S.loc); return; }
-        S.error = e; S.items = [];
+        if (snapshot || keepSel) toastError(e);
+        else { S.error = e; S.items = []; }
       } finally {
         clearTimeout(slow);
         if (my === seq) S.loading = false;
@@ -832,7 +843,7 @@ export default {
         { label: '升序', checked: S.sort.dir > 0, onClick: () => setSort(S.sort.key, 1) },
         { label: '降序', checked: S.sort.dir < 0, onClick: () => setSort(S.sort.key, -1) },
         '-',
-        { label: '刷新', icon: 'refresh-cw', shortcut: 'F5', onClick: () => load({ keepSel: true }) },
+        { label: '刷新', icon: 'refresh-cw', shortcut: 'F5', onClick: () => load({ keepSel: true, force: true }) },
       ]));
     }
 
